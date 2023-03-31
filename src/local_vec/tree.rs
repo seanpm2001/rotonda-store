@@ -104,7 +104,7 @@ where
     pub store: Store,
 }
 
-impl<'a, Store> TreeBitMap<Store>
+impl<Store> TreeBitMap<Store>
 where
     Store: StorageBackend,
 {
@@ -460,34 +460,36 @@ where
 
 // This implements the funky stats for a tree
 #[cfg(feature = "cli")]
-impl<'a, Store: StorageBackend> std::fmt::Display for TreeBitMap<Store> {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<Store: StorageBackend> std::fmt::Display for TreeBitMap<Store> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let total_nodes = self.store.get_nodes_len();
 
-        println!("prefix vec size {}", self.store.get_prefixes_len());
-        println!("finished building tree...");
-        println!("{:?} nodes created", total_nodes);
-        println!(
+        write!(f, "prefix vec size {}", self.store.get_prefixes_len())?;
+        write!(f, "finished building tree...")?;
+        write!(f, "{:?} nodes created", total_nodes)?;
+        write!(f,
             "size of node: {} bytes",
             std::mem::size_of::<SizedStrideNode<u32, InMemNodeId>>()
-        );
-        println!(
+        )?;
+        write!(
+            f,
             "memory used by nodes: {}kb",
             self.store.get_nodes_len()
                 * std::mem::size_of::<SizedStrideNode<u32, InMemNodeId>>()
                 / 1024
-        );
+        )?;
 
-        println!("stride division {:?}", self.strides);
+        write!(f, "stride division {:?}", self.strides)?;
         for s in &self.stats {
-            println!("{:?}", s);
+            write!(f, "{:?}", s)?;
         }
 
-        println!(
+        write!(
+            f,
             "level\t[{}|{}] nodes occupied/max nodes percentage_max_nodes_occupied prefixes",
             Colour::Blue.paint("nodes"),
             Colour::Green.paint("prefixes")
-        );
+        )?;
         let bars = ["▏", "▎", "▍", "▌", "▋", "▊", "▉"];
         let mut stride_bits = [0, 0];
         const SCALE: u32 = 5500;
@@ -513,40 +515,43 @@ impl<'a, Store: StorageBackend> std::fmt::Display for TreeBitMap<Store> {
             let n = (nodes_num / SCALE) as usize;
             let max_pfx = u128::overflowing_pow(2, stride_bits[1] as u32);
 
-            print!("{}-{}\t", stride_bits[0], stride_bits[1]);
+            write!(f, "{}-{}\t", stride_bits[0], stride_bits[1])?;
 
             for _ in 0..n {
-                print!("{}", Colour::Blue.paint("█"));
+                write!(f, "{}", Colour::Blue.paint("█"))?;
             }
 
-            print!(
+            write!(
+                f,
                 "{}",
                 Colour::Blue.paint(
                     bars[((nodes_num % SCALE) / (SCALE / 7)) as usize]
                 ) //  = scale / 7
-            );
+            )?;
 
-            print!(
+            write!(
+                f,
                 " {}/{} {:.2}%",
                 nodes_num,
                 max_pfx.0,
                 (nodes_num as f64 / max_pfx.0 as f64) * 100.0
-            );
-            print!("\n\t");
+            )?;
+            write!(f, "\n\t")?;
 
             let n = (prefixes_num / SCALE) as usize;
             for _ in 0..n {
-                print!("{}", Colour::Green.paint("█"));
+                write!(f, "{}", Colour::Green.paint("█"))?;
             }
 
-            print!(
+            write!(
+                f,
                 "{}",
                 Colour::Green.paint(
                     bars[((nodes_num % SCALE) / (SCALE / 7)) as usize]
                 ) //  = scale / 7
-            );
+            )?;
 
-            println!(" {}", prefixes_num);
+            write!(f, " {}", prefixes_num)?;
         }
         Ok(())
     }

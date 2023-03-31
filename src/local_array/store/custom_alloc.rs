@@ -460,7 +460,7 @@ impl<
                             }
                             retry_count += 1;
                             record = *unsafe {
-                                (*new.into_box())
+                                new.into_box()
                                     .super_agg_record
                                     .0
                                     .load(Ordering::Relaxed, guard)

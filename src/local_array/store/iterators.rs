@@ -69,7 +69,7 @@ impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
         );
 
         loop {
-            if self.cur_len > AF::BITS as u8 {
+            if self.cur_len > AF::BITS {
                 // This is the end, my friend
                 trace!("reached max length {}, returning None", self.cur_len);
                 return None;
@@ -118,7 +118,7 @@ impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
                     self.cursor = 0;
                     self.parents = [None; 26];
 
-                    if self.cur_len > AF::BITS as u8 {
+                    if self.cur_len > AF::BITS {
                         // This is the end, my friend
                         return None;
                     }
@@ -169,7 +169,7 @@ impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
 
             let s_pfx = self
                 .cur_bucket
-                .get_by_index(self.cursor as usize, self.guard);
+                .get_by_index(self.cursor, self.guard);
 
                 // DEPTH FIRST ITERATION
             match s_pfx.get_next_bucket(self.guard) {
@@ -511,7 +511,7 @@ impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
 
             // LEVEL DEPTH ITERATION
             let s_pfx =
-                self.cur_bucket.get_by_index(index as usize, self.guard);
+                self.cur_bucket.get_by_index(index, self.guard);
 
             if let Some(stored_prefix) = s_pfx.get_stored_prefix(self.guard) {
                 trace!("get_record {:?}", stored_prefix.super_agg_record);

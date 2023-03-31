@@ -408,7 +408,7 @@ impl<AF: AddressFamily, M: routecore::record::Meta> PrefixSet<AF, M> {
     ) -> &'a AtomicStoredPrefix<AF, M> {
         assert!(!self.0.load(Ordering::SeqCst, guard).is_null());
         unsafe {
-            self.0.load(Ordering::SeqCst, guard).deref()[index as usize]
+            self.0.load(Ordering::SeqCst, guard).deref()[index]
                 .assume_init_ref()
         }
     }
