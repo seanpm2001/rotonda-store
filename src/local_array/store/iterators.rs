@@ -7,6 +7,7 @@
 // as such all the iterators here are composed of iterators over the
 // individual nodes. The Node Iterators live in the node.rs file.
 
+use std::sync::Arc;
 use std::{marker::PhantomData, sync::atomic::Ordering};
 
 use super::atomic_types::{NodeBuckets, PrefixBuckets, PrefixSet};
@@ -60,7 +61,7 @@ pub(crate) struct PrefixIter<
 impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
     Iterator for PrefixIter<'a, AF, M, PB>
 {
-    type Item = (routecore::addr::Prefix, &'a M);
+    type Item = (routecore::addr::Prefix, M);
 
     fn next(&mut self) -> Option<Self::Item> {
         trace!(
@@ -199,7 +200,7 @@ impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
                         trace!("D. found prefix {:?}", prefix);
                         return Some((
                             s_pfx.get_prefix_id().into_pub(),
-                            &prefix.meta,
+                            prefix.meta.clone(),
                         ));
                     } else {
                         panic!("No prefix here, but there's a child here?");
@@ -218,7 +219,7 @@ impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
                         self.cursor += 1;
                         return Some((
                             s_pfx.get_prefix_id().into_pub(),
-                            &prefix.meta,
+                            prefix.meta.clone(),
                         ));
                     }
                 }
@@ -310,7 +311,7 @@ impl<
         PB: PrefixBuckets<AF, M>,
     > Iterator for MoreSpecificPrefixIter<'a, AF, M, NB, PB>
 {
-    type Item = &'a InternalPrefixRecord<AF, M>;
+    type Item = Arc<InternalPrefixRecord<AF, M>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         trace!("MoreSpecificsPrefixIter");
@@ -450,7 +451,7 @@ pub(crate) struct LessSpecificPrefixIter<
 impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
     Iterator for LessSpecificPrefixIter<'a, AF, M, PB>
 {
-    type Item = &'a InternalPrefixRecord<AF, M>;
+    type Item = Arc<InternalPrefixRecord<AF, M>>;
 
     // This iterator moves down all prefix lengths, starting with the length
     // of the (search prefix - 1), looking for shorter prefixes, where the
@@ -617,7 +618,7 @@ impl<
         &'a self,
         start_prefix_id: PrefixId<AF>,
         guard: &'a Guard,
-    ) -> impl Iterator<Item = &'a InternalPrefixRecord<AF, M>> {
+    ) -> impl Iterator<Item = Arc<InternalPrefixRecord<AF, M>>> + '_ {
         trace!("more specifics for {:?}", start_prefix_id);
 
         // A v4 /32 or a v4 /128 doesn't have more specific prefixes 🤓.
@@ -721,7 +722,7 @@ impl<
         &'a self,
         start_prefix_id: PrefixId<AF>,
         guard: &'a Guard,
-    ) -> impl Iterator<Item = &'a InternalPrefixRecord<AF, M>> {
+    ) -> impl Iterator<Item = Arc<InternalPrefixRecord<AF, M>>> + '_ {
         trace!("less specifics for {:?}", start_prefix_id);
         trace!("level {}, len {}", 0, start_prefix_id.get_len());
 
@@ -755,7 +756,7 @@ impl<
     pub fn prefixes_iter(
         &'a self,
         guard: &'a Guard,
-    ) -> impl Iterator<Item = (Prefix, &'a M)> {
+    ) -> impl Iterator<Item = (Prefix, M)> + 'a {
         PrefixIter {
             prefixes: &self.prefixes,
             cur_bucket: self.prefixes.get_root_prefix_set(0),
@@ -772,36 +773,36 @@ impl<
 
 // ----------- InternalPrefixRecord -> RecordSet (public) -------------------
 
-impl<'a, AF: AddressFamily, Meta: routecore::record::Meta>
-    std::iter::FromIterator<InternalPrefixRecord<AF, Meta>>
-    for routecore::bgp::RecordSet<'a, Meta>
-{
-    fn from_iter<I: IntoIterator<Item = InternalPrefixRecord<AF, Meta>>>(
-        iter: I,
-    ) -> Self {
-        let mut v4 = vec![];
-        let mut v6 = vec![];
-        for pfx in iter {
-            let addr = pfx.net.into_ipaddr();
-            match addr {
-                std::net::IpAddr::V4(_) => {
-                    v4.push(
-                        routecore::bgp::PrefixRecord::new_with_local_meta(
-                            Prefix::new(addr, pfx.len).unwrap(),
-                            pfx.meta,
-                        ),
-                    );
-                }
-                std::net::IpAddr::V6(_) => {
-                    v6.push(
-                        routecore::bgp::PrefixRecord::new_with_local_meta(
-                            Prefix::new(addr, pfx.len).unwrap(),
-                            pfx.meta,
-                        ),
-                    );
-                }
-            }
-        }
-        Self { v4, v6 }
-    }
-}
+// impl<'a, AF: AddressFamily, Meta: routecore::record::Meta>
+//     std::iter::FromIterator<InternalPrefixRecord<AF, Meta>>
+//     for routecore::bgp::RecordSet<'a, Meta>
+// {
+//     fn from_iter<I: IntoIterator<Item = InternalPrefixRecord<AF, Meta>>>(
+//         iter: I,
+//     ) -> Self {
+//         let mut v4 = vec![];
+//         let mut v6 = vec![];
+//         for pfx in iter {
+//             let addr = pfx.net.into_ipaddr();
+//             match addr {
+//                 std::net::IpAddr::V4(_) => {
+//                     v4.push(
+//                         routecore::bgp::PrefixRecord::new_with_local_meta(
+//                             Prefix::new(addr, pfx.len).unwrap(),
+//                             pfx.meta,
+//                         ),
+//                     );
+//                 }
+//                 std::net::IpAddr::V6(_) => {
+//                     v6.push(
+//                         routecore::bgp::PrefixRecord::new_with_local_meta(
+//                             Prefix::new(addr, pfx.len).unwrap(),
+//                             pfx.meta,
+//                         ),
+//                     );
+//                 }
+//             }
+//         }
+//         Self { v4, v6 }
+//     }
+// }

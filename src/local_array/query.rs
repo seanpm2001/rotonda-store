@@ -1,10 +1,11 @@
+use std::sync::Arc;
+
 use crossbeam_epoch::{self as epoch};
 use epoch::Guard;
-use routecore::bgp::RecordSet;
 
 use crate::af::AddressFamily;
 use crate::local_array::store::atomic_types::{NodeBuckets, PrefixBuckets};
-use crate::prefix_record::InternalPrefixRecord;
+use crate::prefix_record::{InternalPrefixRecord, RecordSet};
 use routecore::addr::Prefix;
 use routecore::record::{MergeUpdate, Meta};
 
@@ -30,7 +31,7 @@ where
         &'a self,
         prefix_id: PrefixId<AF>,
         guard: &'a Guard,
-    ) -> QueryResult<'a, M> {
+    ) -> QueryResult<M> {
         let result = self
             .store
             .non_recursive_retrieve_prefix_with_guard(prefix_id, guard);
@@ -49,7 +50,7 @@ where
                 None
             },
             prefix_meta: prefix.and_then(|r| {
-                r.super_agg_record.get_record(guard).map(|r| &r.meta)
+                r.super_agg_record.get_record(guard).map(|r| r.meta.clone())
             }),
             match_type: MatchType::EmptyMatch,
             less_specifics: None,
@@ -61,7 +62,7 @@ where
         &'a self,
         prefix_id: PrefixId<AF>,
         guard: &'a Guard,
-    ) -> QueryResult<'a, M> {
+    ) -> QueryResult<M> {
         let result = self
             .store
             .non_recursive_retrieve_prefix_with_guard(prefix_id, guard);
@@ -84,7 +85,7 @@ where
                 None
             },
             prefix_meta: prefix.and_then(|r| {
-                r.super_agg_record.get_record(guard).map(|r| &r.meta)
+                r.super_agg_record.get_record(guard).map(|r| r.meta.clone())
             }),
             match_type: MatchType::EmptyMatch,
             less_specifics: less_specifics_vec.map(|iter| iter.collect()),
@@ -97,7 +98,7 @@ where
         prefix_id: PrefixId<AF>,
         guard: &'a Guard,
     ) -> Result<
-        impl Iterator<Item = &'a InternalPrefixRecord<AF, M>>,
+        impl Iterator<Item = Arc<InternalPrefixRecord<AF, M>>> + '_,
         std::io::Error,
     > {
         Ok(self.store.more_specific_prefix_iter_from(prefix_id, guard))
@@ -108,7 +109,7 @@ where
         search_pfx: PrefixId<AF>,
         options: &MatchOptions,
         guard: &'a Guard,
-    ) -> QueryResult<'a, M> {
+    ) -> QueryResult<M> {
         // `non_recursive_retrieve_prefix_with_guard` return an exact match
         // only, so no longest matching prefix!
         let mut stored_prefix = self
@@ -150,13 +151,13 @@ where
         };
 
         QueryResult {
-            prefix: stored_prefix.map(|p| p.prefix_into_pub()),
-            prefix_meta: stored_prefix.map(|pfx| &pfx.meta),
+            prefix: stored_prefix.as_ref().map(|p| p.prefix_into_pub()),
+            prefix_meta: stored_prefix.as_ref().map(|pfx| pfx.meta.clone()),
             less_specifics: if include_less_specifics {
                 Some(
                     self.store
                         .less_specific_prefix_iter(
-                            if let Some(pfx) = stored_prefix {
+                            if let Some(ref pfx) = stored_prefix {
                                 pfx.get_prefix_id()
                             } else {
                                 search_pfx
@@ -227,7 +228,7 @@ where
         search_pfx: PrefixId<AF>,
         options: &MatchOptions,
         guard: &'a Guard,
-    ) -> QueryResult<'a, M> {
+    ) -> QueryResult<M> {
         // --- The Default Route Prefix -------------------------------------
 
         // The Default Route Prefix unfortunately does not fit in tree as we
@@ -258,7 +259,7 @@ where
                         .unwrap()
                         .0
                         .get_record(guard)
-                        .map(|r| &r.meta);
+                        .map(|r| r.meta.clone());
                     return QueryResult {
                         prefix: Prefix::new(
                             search_pfx.get_net().into_ipaddr(),
@@ -750,7 +751,7 @@ where
                 pfx.0.prefix.into_pub()
             }),
             prefix_meta: prefix.and_then(|pfx| {
-                pfx.0.get_record(guard).map(|r| &r.meta)
+                pfx.0.get_record(guard).map(|r| (*r).meta.clone())
             }),
             match_type,
             less_specifics: if options.include_less_specifics {

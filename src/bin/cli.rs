@@ -6,8 +6,6 @@ use rotonda_store::PrefixAs;
 use rotonda_store::{MatchOptions, MatchType, MultiThreadedStore};
 
 use routecore::addr::Prefix;
-use routecore::bgp::PrefixRecord;
-use routecore::record::Record;
 
 use std::env;
 use std::error::Error;
@@ -43,7 +41,7 @@ fn load_prefixes(
 
         let len: u8 = record[1].parse().unwrap();
         let asn: u32 = record[2].parse().unwrap();
-        let pfx = PrefixRecord::new_with_local_meta(
+        let pfx = PrefixRecord::new(
             Prefix::new(ip, len)?,
             PrefixAs(asn),
         );
@@ -79,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start = std::time::Instant::now();
 
     for pfx in pfxs.into_iter() {
-        tree_bitmap.insert(&pfx.prefix, pfx.meta.into_owned())?;
+        tree_bitmap.insert(&pfx.prefix, pfx.meta)?;
     }
     let ready = std::time::Instant::now();
     // println!("{:#?}", tree_bitmap.store.prefixes);
