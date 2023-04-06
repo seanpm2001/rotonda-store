@@ -441,15 +441,17 @@ impl<
                             if log_enabled!(log::Level::Info) {
                                 let StoredPrefix {
                                     prefix,
-                                    super_agg_record,
+                                    record: stored_record,
                                     ..
                                 } = unsafe { spfx.deref() };
-                                info!(
-                                    "{} store: Inserted new prefix record {}/{} with {:?}",
-                                    std::thread::current().name().unwrap(),
-                                    prefix.get_net().into_ipaddr(), prefix.get_len(),
-                                    super_agg_record.get_record(guard).unwrap().meta
-                                );
+                                if log_enabled!(log::Level::Info) {
+                                    info!(
+                                        "{} store: Inserted new prefix record {}/{} with {:?}",
+                                        std::thread::current().name().unwrap(),
+                                        prefix.get_net().into_ipaddr(), prefix.get_len(),
+                                        stored_record.get_meta_cloned()
+                                    );
+                                }
                             }
 
                             return Ok(retry_count);
@@ -464,10 +466,7 @@ impl<
                             }
                             retry_count += 1;
                             new_record =
-                                new.super_agg_record.0.load().clone();
-                            // .into_owned()
-                            // .into_box()
-                            // .clone();
+                                new.into_box().get_record_as_arc().clone();
                             continue;
                         }
                     }
@@ -481,87 +480,22 @@ impl<
                             new_record.len
                         );
                     }
-                    // let curr_record =
-                    //     &unsafe { inner_stored_prefix.into_owned() }
-                    //         .super_agg_record.0;
 
                     let super_agg_record =
-                        &unsafe { inner_stored_prefix.deref() }
-                            .super_agg_record
-                            .0;
+                        unsafe { inner_stored_prefix.deref() }
+                            .record
+                            .as_arc_swap();
 
-                    super_agg_record.rcu(|inner| 
+                    super_agg_record.rcu(|inner| {
                         InternalPrefixRecord::<AF, Meta>::new_with_meta(
                             new_record.net,
                             new_record.len,
                             inner
                                 .meta
                                 .clone_merge_update(&new_record.meta)
-                                .unwrap()
+                                .unwrap(),
                         )
-                    );
-                    // loop {
-                    // let prefix_record =
-                    //     inner_agg_record.as_ref();
-                    // let new_record = Owned::new(InternalPrefixRecord::<
-                    //     AF,
-                    //     Meta,
-                    // >::new_with_meta(
-                    //     new_record.net,
-                    //     new_record.len,
-                    //     prefix_record
-                    //         .meta
-                    //         .clone_merge_update(&new_record.clone().meta)
-                    //         .unwrap(),
-                    // ))
-                    // .into_shared(guard);
-
-                    // CAS the nested Atomic InternalPrefixRecord.
-                    // match super_agg_record.compare_exchange(
-                    //     inner_agg_record,
-                    //     new_record,
-                    //     Ordering::AcqRel,
-                    //     Ordering::Acquire,
-                    //     guard,
-                    // ) {
-                    //     Ok(_rec) => {
-                    //         if log_enabled!(log::Level::Info) {
-                    //             let record = unsafe { _rec.deref() };
-                    //             info!(
-                    //                 "{} store: Updated existing prefix record {}/{} with {:?}",
-                    //                 std::thread::current().name().unwrap(),
-                    //                 record.net.into_ipaddr(), record.len,
-                    //                 unsafe { super_agg_record.load(Ordering::Relaxed, guard).deref() }.meta
-                    //             );
-                    //         }
-
-                    //         if !inner_agg_record.is_null() {
-                    //             unsafe {
-                    //                 guard.defer_unchecked(move || {
-                    //                     std::sync::atomic::fence(
-                    //                         Ordering::Acquire,
-                    //                     );
-
-                    //                     std::mem::drop(
-                    //                         inner_agg_record.into_owned(),
-                    //                     )
-                    //                 });
-                    //             }
-                    //         };
-                    //         return Ok(retry_count);
-                    //     }
-                    //     Err(next_agg) => {
-                    //         // Do it again
-                    //         if log_enabled!(log::Level::Warn) {
-                    //             debug!("{} store: Contention. Retrying prefix {:?}. Attempt {}",
-                    //                 std::thread::current().name().unwrap(), next_agg.current, retry_count);
-                    //         }
-                    //         retry_count += 1;
-                    //         inner_agg_record = next_agg.current;
-                    //         backoff.spin();
-                    //         continue;
-                    //     }
-                    // }
+                    });
                     return Ok(retry_count);
                 }
             }
@@ -679,22 +613,20 @@ impl<
                     unsafe { prefix_ref.assume_init_ref() }
                         .get_stored_prefix(guard)
                 {
-                    if let Some(pfx_rec) = stored_prefix.get_record(guard) {
-                        if id == pfx_rec.get_prefix_id() {
-                            trace!("found requested prefix {:?}", id);
-                            parents[level as usize] =
-                                Some((prefix_set, index));
-                            return (
-                                Some(stored_prefix),
-                                Some((id, level, prefix_set, parents, index)),
-                            );
-                        };
-                        // Advance to the next level.
-                        prefix_set = &stored_prefix.next_bucket;
-                        level += 1;
-                        backoff.spin();
-                        continue;
-                    }
+                    let pfx_rec = &*stored_prefix.get_record_as_guarded();
+                    if id == pfx_rec.get_prefix_id() {
+                        trace!("found requested prefix {:?}", id);
+                        parents[level as usize] = Some((prefix_set, index));
+                        return (
+                            Some(stored_prefix),
+                            Some((id, level, prefix_set, parents, index)),
+                        );
+                    };
+                    // Advance to the next level.
+                    prefix_set = &stored_prefix.next_bucket;
+                    level += 1;
+                    backoff.spin();
+                    continue;
                 }
             }
 
@@ -737,26 +669,18 @@ impl<
                     unsafe { prefix_ref.assume_init_ref() }
                         .get_stored_prefix(guard)
                 {
-                    if let Some(pfx_rec) =
-                        stored_prefix.super_agg_record.get_record(guard)
-                    {
-                        if prefix_id
-                            == PrefixId::new(pfx_rec.net, pfx_rec.len)
-                        {
-                            trace!("found requested prefix {:?}", prefix_id);
-                            return Some((
-                                stored_prefix,
-                                &stored_prefix.serial,
-                            ));
-                        };
-                        level += 1;
-                        (search_level.f)(
-                            search_level,
-                            &stored_prefix.next_bucket,
-                            level,
-                            guard,
-                        );
+                    let pfx_rec = &*stored_prefix.get_record_as_guarded();
+                    if prefix_id == PrefixId::new(pfx_rec.net, pfx_rec.len) {
+                        trace!("found requested prefix {:?}", prefix_id);
+                        return Some((stored_prefix, &stored_prefix.serial));
                     };
+                    level += 1;
+                    (search_level.f)(
+                        search_level,
+                        &stored_prefix.next_bucket,
+                        level,
+                        guard,
+                    );
                 }
                 None
             },

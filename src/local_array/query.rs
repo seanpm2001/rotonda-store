@@ -49,9 +49,7 @@ where
             } else {
                 None
             },
-            prefix_meta: prefix.and_then(|r| {
-                r.super_agg_record.get_record(guard).map(|r| r.meta.clone())
-            }),
+            prefix_meta: prefix.map(|r| r.get_meta_cloned()),
             match_type: MatchType::EmptyMatch,
             less_specifics: None,
             more_specifics: Some(more_specifics_vec.collect()),
@@ -84,9 +82,7 @@ where
             } else {
                 None
             },
-            prefix_meta: prefix.and_then(|r| {
-                r.super_agg_record.get_record(guard).map(|r| r.meta.clone())
-            }),
+            prefix_meta: prefix.map(|r| r.get_meta_cloned()),
             match_type: MatchType::EmptyMatch,
             less_specifics: less_specifics_vec.map(|iter| iter.collect()),
             more_specifics: None,
@@ -116,7 +112,7 @@ where
             .store
             .non_recursive_retrieve_prefix_with_guard(search_pfx, guard)
             .0
-            .and_then(|pfx| pfx.get_record(guard));
+            .map(|pfx| pfx.get_record_as_arc());
 
         // Check if we have an actual exact match, if not then fetch the
         // first lesser-specific with the greatest length, that's the Longest
@@ -256,10 +252,7 @@ where
                             PrefixId::new(AF::zero(), 0),
                             guard,
                         )
-                        .unwrap()
-                        .0
-                        .get_record(guard)
-                        .map(|r| r.meta.clone());
+                        .map(|sp| sp.0.get_meta_cloned());
                     return QueryResult {
                         prefix: Prefix::new(
                             search_pfx.get_net().into_ipaddr(),
@@ -750,9 +743,7 @@ where
             prefix: prefix.map(|pfx: (&StoredPrefix<AF, M>, usize)| {
                 pfx.0.prefix.into_pub()
             }),
-            prefix_meta: prefix.and_then(|pfx| {
-                pfx.0.get_record(guard).map(|r| (*r).meta.clone())
-            }),
+            prefix_meta: prefix.map(|pfx| pfx.0.get_meta_cloned()),
             match_type,
             less_specifics: if options.include_less_specifics {
                 less_specifics_vec
@@ -761,7 +752,7 @@ where
                     .filter_map(move |p| {
                         self.store
                             .retrieve_prefix_with_guard(*p, guard)
-                            .map(|p| p.0.get_record(guard))
+                            .map(|p| Some(p.0.get_record_as_arc()))
                     })
                     .collect()
             } else {
@@ -779,9 +770,8 @@ where
                                         p
                                     )
                                 })
-                                .0
+                                .0.get_record_as_arc()
                         })
-                        .filter_map(|p| p.get_record(guard))
                         .collect()
                 })
             } else {
