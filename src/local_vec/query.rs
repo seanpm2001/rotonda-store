@@ -36,7 +36,7 @@ pub struct QueryResult<Meta: routecore::record::Meta> {
     pub more_specifics: Option<RecordSet<Meta>>,
 }
 
-impl<'a, Meta: routecore::record::Meta> std::fmt::Display
+impl<Meta: routecore::record::Meta> std::fmt::Display
     for QueryResult<Meta>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

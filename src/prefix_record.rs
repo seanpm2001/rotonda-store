@@ -152,21 +152,6 @@ where
     }
 }
 
-// impl<'a, AF, M> From<routecore::bgp::PrefixRecord<'a, M>>
-//     for InternalPrefixRecord<AF, M>
-// where
-//     AF: AddressFamily,
-//     M: Meta,
-// {
-//     fn from(record: routecore::bgp::PrefixRecord<'a, M>) -> Self {
-//         Self {
-//             net: AF::from_ipaddr(record.key().addr()),
-//             len: record.key().len(),
-//             meta: record.meta().into_owned(),
-//         }
-//     }
-// }
-
 impl<M: Meta> From<PublicPrefixRecord<M>>
     for InternalPrefixRecord<crate::IPv4, M>
 {
@@ -214,15 +199,15 @@ impl<M: Meta> PublicPrefixRecord<M> {
     }
 }
 
-impl<AF, M> From<Arc<InternalPrefixRecord<AF, M>>> for PublicPrefixRecord<M>
+impl<AF, M> From<(PrefixId<AF>, Arc<M>)> for PublicPrefixRecord<M>
 where
     AF: AddressFamily,
     M: Meta,
 {
-    fn from(record: Arc<InternalPrefixRecord<AF, M>>) -> Self {
+    fn from(record: (PrefixId<AF>, Arc<M>)) -> Self {
         Self {
-            prefix: record.prefix_into_pub(),
-            meta: record.meta.clone(),
+            prefix: record.0.into_pub(),
+            meta: (*record.1).clone(),
         }
     }
 }
@@ -233,7 +218,7 @@ impl<M: Meta> std::fmt::Display for PublicPrefixRecord<M> {
     }
 }
 
-impl<'a, M: Meta> From<(Prefix, M)> for PublicPrefixRecord<M> {
+impl<M: Meta> From<(Prefix, M)> for PublicPrefixRecord<M> {
     fn from((prefix, meta): (Prefix, M)) -> Self {
         Self { prefix, meta }
     }
@@ -247,7 +232,7 @@ pub struct RecordSet<M: Meta> {
     pub v6: Vec<PublicPrefixRecord<M>>,
 }
 
-impl<'a, M: Meta> RecordSet<M> {
+impl<M: Meta> RecordSet<M> {
     pub fn is_empty(&self) -> bool {
         self.v4.is_empty() && self.v6.is_empty()
     }
@@ -275,7 +260,7 @@ impl<'a, M: Meta> RecordSet<M> {
     }
 }
 
-impl<'a, M: Meta> fmt::Display for RecordSet<M> {
+impl<M: Meta> fmt::Display for RecordSet<M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let arr_str_v4 =
             self.v4.iter().fold("".to_string(), |pfx_arr, pfx| {
@@ -290,7 +275,7 @@ impl<'a, M: Meta> fmt::Display for RecordSet<M> {
     }
 }
 
-impl<'a, M: Meta>
+impl<M: Meta>
     From<(Vec<PublicPrefixRecord<M>>, Vec<PublicPrefixRecord<M>>)>
     for RecordSet<M>
 {
@@ -325,22 +310,22 @@ impl<'a, M: Meta + 'a> std::iter::FromIterator<Arc<PublicPrefixRecord<M>>>
 }
 
 impl<'a, AF: AddressFamily, M: Meta + 'a>
-    std::iter::FromIterator<Arc<InternalPrefixRecord<AF, M>>>
+    std::iter::FromIterator<(PrefixId<AF>, Arc<M>)>
     for RecordSet<M>
 {
-    fn from_iter<I: IntoIterator<Item = Arc<InternalPrefixRecord<AF, M>>>>(
+    fn from_iter<I: IntoIterator<Item = (PrefixId<AF>, Arc<M>)>>(
         iter: I,
     ) -> Self {
         let mut v4 = vec![];
         let mut v6 = vec![];
         for pfx in iter {
-            let u_pfx = (*pfx).prefix_into_pub();
+            let u_pfx = pfx.0.into_pub();
             match u_pfx.addr() {
                 std::net::IpAddr::V4(_) => {
-                    v4.push(PublicPrefixRecord::new(u_pfx, pfx.meta.clone()));
+                    v4.push(PublicPrefixRecord::new(u_pfx, (*pfx.1).clone()));
                 }
                 std::net::IpAddr::V6(_) => {
-                    v6.push(PublicPrefixRecord::new(u_pfx, pfx.meta.clone()));
+                    v6.push(PublicPrefixRecord::new(u_pfx, (*pfx.1).clone()));
                 }
             }
         }

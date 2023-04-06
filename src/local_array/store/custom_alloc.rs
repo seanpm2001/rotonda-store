@@ -112,7 +112,7 @@ use crate::local_array::{
     bit_span::BitSpan, store::errors::PrefixStoreError,
 };
 
-use crate::prefix_record::InternalPrefixRecord;
+// use crate::prefix_record::InternalPrefixRecord;
 use crate::{
     impl_search_level, retrieve_node_mut_with_guard_closure,
     store_node_closure,
@@ -400,16 +400,17 @@ impl<
 
     pub(crate) fn upsert_prefix(
         &self,
-        record: InternalPrefixRecord<AF, Meta>,
+        prefix: PrefixId<AF>,
+        record: Meta,
         guard: &Guard,
-    ) -> Result<u32, PrefixStoreError> {
+    ) -> Result<(Upsert, u32), PrefixStoreError> {
         // let backoff = Backoff::new();
         let mut retry_count = 0;
         let mut new_record = Arc::new(record);
 
         let (atomic_stored_prefix, level) = self
             .non_recursive_retrieve_prefix_mut_with_guard(
-                PrefixId::new(new_record.net, new_record.len),
+                PrefixId::new(prefix.get_net(), prefix.get_len()),
                 guard,
             )?;
         let inner_stored_prefix =
@@ -426,8 +427,11 @@ impl<
                             std::thread::current().name().unwrap()
                         );
                     }
-                    let new_stored_prefix =
-                        StoredPrefix::new::<PB>(new_record, level);
+                    let new_stored_prefix = StoredPrefix::new::<PB>(
+                        PrefixId::new(prefix.get_net(), prefix.get_len()),
+                        new_record,
+                        level,
+                    );
 
                     // We're expecting an empty slot.
                     match atomic_stored_prefix.0.compare_exchange(
@@ -454,7 +458,7 @@ impl<
                                 }
                             }
 
-                            return Ok(retry_count);
+                            return Ok((Upsert::Insert, retry_count));
                         }
                         Err(CompareExchangeError { current, new }) => {
                             if log_enabled!(log::Level::Debug) {
@@ -476,27 +480,19 @@ impl<
                         debug!(
                             "{} store: Found existing super-aggregated prefix record for {}/{}",
                             std::thread::current().name().unwrap(),
-                            new_record.net,
-                            new_record.len
+                            prefix.get_net(),
+                            prefix.get_len()
                         );
                     }
 
-                    let super_agg_record =
-                        unsafe { inner_stored_prefix.deref() }
-                            .record
-                            .as_arc_swap();
+                    unsafe { inner_stored_prefix.deref() }
+                        .record
+                        .as_arc_swap()
+                        .rcu(|meta| {
+                            meta.clone_merge_update(&new_record).unwrap()
+                        });
 
-                    super_agg_record.rcu(|inner| {
-                        InternalPrefixRecord::<AF, Meta>::new_with_meta(
-                            new_record.net,
-                            new_record.len,
-                            inner
-                                .meta
-                                .clone_merge_update(&new_record.meta)
-                                .unwrap(),
-                        )
-                    });
-                    return Ok(retry_count);
+                    return Ok((Upsert::Update, retry_count));
                 }
             }
         }
@@ -613,8 +609,7 @@ impl<
                     unsafe { prefix_ref.assume_init_ref() }
                         .get_stored_prefix(guard)
                 {
-                    let pfx_rec = &*stored_prefix.get_record_as_guarded();
-                    if id == pfx_rec.get_prefix_id() {
+                    if id == stored_prefix.get_prefix_id() {
                         trace!("found requested prefix {:?}", id);
                         parents[level as usize] = Some((prefix_set, index));
                         return (
@@ -669,8 +664,7 @@ impl<
                     unsafe { prefix_ref.assume_init_ref() }
                         .get_stored_prefix(guard)
                 {
-                    let pfx_rec = &*stored_prefix.get_record_as_guarded();
-                    if prefix_id == PrefixId::new(pfx_rec.net, pfx_rec.len) {
+                    if prefix_id == stored_prefix.prefix {
                         trace!("found requested prefix {:?}", prefix_id);
                         return Some((stored_prefix, &stored_prefix.serial));
                     };
@@ -851,3 +845,19 @@ impl<
             .dangerously_truncate_to_u32() as usize
     }
 }
+
+//------------ Upsert -------------------------------------------------------
+pub enum Upsert {
+    Insert,
+    Update
+}
+
+impl std::fmt::Display for Upsert {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Upsert::Insert => write!(f, "Insert"),
+            Upsert::Update => write!(f, "Update")
+        }
+    }
+}
+

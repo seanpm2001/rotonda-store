@@ -9,6 +9,7 @@ pub use crate::{AddressFamily, IPv4, IPv6, PrefixRecordMap};
 pub use rotonda_macros::create_store;
 pub use rotonda_macros::stride_sizes;
 
+pub use crate::custom_alloc::Upsert;
 pub use crate::custom_alloc::CustomAllocStorage;
 pub use crate::local_array::store::atomic_types::{
     NodeBuckets, NodeSet, PrefixBuckets, PrefixSet,

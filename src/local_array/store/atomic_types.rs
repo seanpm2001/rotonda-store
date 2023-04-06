@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::{fmt::Debug, mem::MaybeUninit, sync::atomic::Ordering};
 
 use arc_swap::access::Access;
-use arc_swap::Guard as ArcSwapGuard;
-use arc_swap::{ArcSwap, ArcSwapAny};
+use arc_swap::ArcSwap;
 use crossbeam_epoch::{self as epoch, Atomic};
 
 use log::{debug, log_enabled, trace};
@@ -11,7 +10,6 @@ use log::{debug, log_enabled, trace};
 use epoch::{Guard, Owned};
 
 use crate::local_array::tree::*;
-use crate::prefix_record::InternalPrefixRecord;
 use crate::AddressFamily;
 
 // ----------- Node related structs -----------------------------------------
@@ -33,12 +31,6 @@ where
     pub(crate) node: TreeBitMapNode<AF, S>,
     pub(crate) node_set: NodeSet<AF, S>,
 }
-
-// impl<AF: AddressFamily, S: Stride> Default for StoredNode<AF, S> {
-//     fn default() -> Self {
-//         StoredNode::Empty
-//     }
-// }
 
 impl<AF: AddressFamily, S: Stride> NodeSet<AF, S> {
     pub fn init(size: usize) -> Self {
@@ -73,7 +65,7 @@ pub struct StoredPrefix<AF: AddressFamily, M: routecore::record::Meta> {
     // the prefix itself,
     pub prefix: PrefixId<AF>,
     // the aggregated data for this prefix
-    pub(crate) record: AtomicRecord<AF, M>,
+    pub(crate) record: AtomicRecord<M>,
     // the next aggregated record for this prefix and hash_id
     // pub(crate) next_agg_record: Atomic<StoredAggRecord<AF, M>>,
     // the reference to the next set of records for this prefix, if any.
@@ -82,12 +74,13 @@ pub struct StoredPrefix<AF: AddressFamily, M: routecore::record::Meta> {
 
 impl<AF: AddressFamily, M: routecore::record::Meta> StoredPrefix<AF, M> {
     pub fn new<PB: PrefixBuckets<AF, M>>(
-        record: Arc<InternalPrefixRecord<AF, M>>,
+        pfx_id: PrefixId<AF>,
+        record: Arc<M>,
         level: u8,
     ) -> Self {
         // start calculation size of next set, it's dependent on the level
         // we're in.
-        let pfx_id = PrefixId::new(record.net, record.len);
+        // let pfx_id = PrefixId::new(record.net, record.len);
         let this_level = PB::get_bits_for_len(pfx_id.get_len(), level);
         let next_level = PB::get_bits_for_len(pfx_id.get_len(), level + 1);
 
@@ -112,26 +105,24 @@ impl<AF: AddressFamily, M: routecore::record::Meta> StoredPrefix<AF, M> {
 
         StoredPrefix {
             serial: 1,
-            prefix: record.get_prefix_id(),
-            record: AtomicRecord::<AF, M>::new(record),
+            prefix: pfx_id,
+            record: AtomicRecord::<M>::new(record),
             next_bucket,
         }
     }
 
+    pub(crate) fn get_prefix_id(&self) -> PrefixId<AF> {
+        self.prefix
+    }
+
     pub(crate) fn get_record_as_arc(
         &self,
-    ) -> Arc<InternalPrefixRecord<AF, M>> {
+    ) -> Arc<M> {
         self.record.as_arc()
     }
 
-    pub(crate) fn get_record_as_guarded(
-        &self,
-    ) -> ArcSwapGuard<Arc<InternalPrefixRecord<AF, M>>> {
-        self.record.as_guarded()
-    }
-
     pub(crate) fn get_meta_cloned(&self) -> M {
-        self.record.as_arc_swap().load().meta.clone()
+        (*(*self.record.as_arc_swap().load())).clone()
     }
 }
 
@@ -140,41 +131,28 @@ impl<AF: AddressFamily, M: routecore::record::Meta> StoredPrefix<AF, M> {
 // prefix.
 
 #[derive(Debug)]
-pub(crate) struct AtomicRecord<AF: AddressFamily, M: routecore::record::Meta>(
-    ArcSwap<InternalPrefixRecord<AF, M>>,
+pub(crate) struct AtomicRecord<M: routecore::record::Meta>(
+    ArcSwap<M>,
 );
 
-impl<AF: AddressFamily, M: routecore::record::Meta> AtomicRecord<AF, M> {
-    pub fn new(record: Arc<InternalPrefixRecord<AF, M>>) -> Self {
-        debug!(
-            "{} store: create new stored prefix record {}/{} with {}",
-            std::thread::current().name().unwrap(),
-            record.net.into_ipaddr(),
-            record.len,
-            record
-        );
+impl<M: routecore::record::Meta> AtomicRecord<M> {
+    pub fn new(record: Arc<M>) -> Self {
         AtomicRecord(ArcSwap::new(record))
     }
 
     pub fn as_arc_swap(
         &self,
-    ) -> &ArcSwapAny<Arc<InternalPrefixRecord<AF, M>>> {
+    ) -> &arc_swap::ArcSwapAny<Arc<M>> {
         &self.0
     }
 
-    pub fn as_guarded(
-        &self,
-    ) -> ArcSwapGuard<Arc<InternalPrefixRecord<AF, M>>> {
-        self.0.load()
-    }
-
-    pub fn as_arc(&self) -> Arc<InternalPrefixRecord<AF, M>> {
+    pub fn as_arc(&self) -> Arc<M> {
         self.0.load().clone()
     }
 
     pub fn get_meta_cloned(&self) -> M {
         self.0
-            .map(|r: &InternalPrefixRecord<AF, M>| &r.meta)
+            .map(|r: &M| r)
             .load()
             .clone()
     }
@@ -241,14 +219,6 @@ impl<AF: AddressFamily, Meta: routecore::record::Meta>
         }
     }
 
-    pub fn get_agg_record<'a>(
-        &'a self,
-        guard: &'a Guard,
-    ) -> Option<Arc<InternalPrefixRecord<AF, Meta>>> {
-        self.get_stored_prefix(guard)
-            .map(|stored_prefix| stored_prefix.record.0.load().clone())
-    }
-
     // PrefixSet is an Atomic that might be a null pointer, which is
     // UB! Therefore we keep the prefix record in an Option: If
     // that Option is None, then the PrefixSet is a null pointer and
@@ -276,36 +246,6 @@ impl<AF: AddressFamily, Meta: routecore::record::Meta>
     }
 }
 
-// impl<AF: AddressFamily, Meta: routecore::record::Meta>
-//     std::convert::From<crossbeam_epoch::Shared<'_, StoredPrefix<AF, Meta>>>
-//     for &AtomicStoredPrefix<AF, Meta>
-// {
-//     fn from(p: crossbeam_epoch::Shared<'_, StoredPrefix<AF, Meta>>) -> Self {
-//         unsafe { std::mem::transmute(p) }
-//     }
-// }
-
-// impl<AF: AddressFamily, Meta: routecore::record::Meta>
-//     std::convert::From<
-//         crossbeam_epoch::Owned<(
-//             usize,
-//             Option<InternalPrefixRecord<AF, Meta>>,
-//             PrefixSet<AF, Meta>,
-//             Option<Box<InternalPrefixRecord<AF, Meta>>>,
-//         )>,
-//     > for &AtomicStoredPrefix<AF, Meta>
-// {
-//     fn from(
-//         p: crossbeam_epoch::Owned<(
-//             usize,
-//             Option<InternalPrefixRecord<AF, Meta>>,
-//             PrefixSet<AF, Meta>,
-//             Option<Box<InternalPrefixRecord<AF, Meta>>>,
-//         )>,
-//     ) -> Self {
-//         unsafe { std::mem::transmute(p) }
-//     }
-// }
 
 // ----------- FamilyBuckets Trait ------------------------------------------
 //

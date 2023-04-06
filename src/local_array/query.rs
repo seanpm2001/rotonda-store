@@ -5,7 +5,7 @@ use epoch::Guard;
 
 use crate::af::AddressFamily;
 use crate::local_array::store::atomic_types::{NodeBuckets, PrefixBuckets};
-use crate::prefix_record::{InternalPrefixRecord, RecordSet};
+use crate::prefix_record::RecordSet;
 use routecore::addr::Prefix;
 use routecore::record::{MergeUpdate, Meta};
 
@@ -94,7 +94,7 @@ where
         prefix_id: PrefixId<AF>,
         guard: &'a Guard,
     ) -> Result<
-        impl Iterator<Item = Arc<InternalPrefixRecord<AF, M>>> + '_,
+        impl Iterator<Item = (PrefixId<AF>, Arc<M>)> + '_,
         std::io::Error,
     > {
         Ok(self.store.more_specific_prefix_iter_from(prefix_id, guard))
@@ -112,7 +112,7 @@ where
             .store
             .non_recursive_retrieve_prefix_with_guard(search_pfx, guard)
             .0
-            .map(|pfx| pfx.get_record_as_arc());
+            .map(|pfx| (pfx.prefix, pfx.get_record_as_arc()));
 
         // Check if we have an actual exact match, if not then fetch the
         // first lesser-specific with the greatest length, that's the Longest
@@ -122,7 +122,7 @@ where
         let mut include_less_specifics = false;
         let match_type = match (&options.match_type, &stored_prefix) {
             // we found an exact match, we don't need to do anything.
-            (_, Some(_pfx)) => {
+            (_, Some((_pfx, _meta))) => {
                 include_more_specifics = options.include_more_specifics;
                 include_less_specifics = options.include_less_specifics;
                 MatchType::ExactMatch
@@ -133,7 +133,7 @@ where
                 stored_prefix = self
                     .store
                     .less_specific_prefix_iter(search_pfx, guard)
-                    .max_by(|p0, p1| p0.len.cmp(&p1.len));
+                    .max_by(|p0, p1| p0.0.get_len().cmp(&p1.0.get_len()));
                 include_more_specifics = options.include_more_specifics;
                 include_less_specifics = options.include_less_specifics;
                 if stored_prefix.is_some() {
@@ -147,14 +147,14 @@ where
         };
 
         QueryResult {
-            prefix: stored_prefix.as_ref().map(|p| p.prefix_into_pub()),
-            prefix_meta: stored_prefix.as_ref().map(|pfx| pfx.meta.clone()),
+            prefix: stored_prefix.as_ref().map(|p| p.0.into_pub()),
+            prefix_meta: stored_prefix.as_ref().map(|pfx| (*pfx.1).clone()),
             less_specifics: if include_less_specifics {
                 Some(
                     self.store
                         .less_specific_prefix_iter(
                             if let Some(ref pfx) = stored_prefix {
-                                pfx.get_prefix_id()
+                                pfx.0
                             } else {
                                 search_pfx
                             },
@@ -175,7 +175,7 @@ where
                     self.store
                         .more_specific_prefix_iter_from(
                             if let Some(pfx) = stored_prefix {
-                                pfx.get_prefix_id()
+                                pfx.0
                             } else {
                                 search_pfx
                             },
@@ -752,7 +752,7 @@ where
                     .filter_map(move |p| {
                         self.store
                             .retrieve_prefix_with_guard(*p, guard)
-                            .map(|p| Some(p.0.get_record_as_arc()))
+                            .map(|p| Some((p.0.prefix, p.0.get_record_as_arc())))
                     })
                     .collect()
             } else {
@@ -770,8 +770,8 @@ where
                                         p
                                     )
                                 })
-                                .0.get_record_as_arc()
-                        })
+                                .0
+                        }).map(|sp| (sp.prefix, sp.get_record_as_arc()))
                         .collect()
                 })
             } else {
