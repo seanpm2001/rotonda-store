@@ -98,7 +98,7 @@ impl std::fmt::Display for MatchType {
 
 //------------ Metadata Types -----------------------------------------------
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PrefixAs(pub u32);
 
 impl MergeUpdate for PrefixAs {
@@ -155,11 +155,11 @@ impl fmt::Display for PrefixAs {
 
 // Hash implementation that always returns the same hash, so that all
 // records get thrown on one big heap.
-impl std::hash::Hash for PrefixAs {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        0.hash(state);
-    }
-}
+// impl std::hash::Hash for PrefixAs {
+//     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+//         0.hash(state);
+//     }
+// }
 
 //------------ PrefixRecordIter ---------------------------------------------
 
@@ -285,7 +285,7 @@ pub struct QueryResult<M: routecore::record::Meta> {
     pub more_specifics: Option<RecordSet<M>>,
 }
 
-impl<'a, M: routecore::record::Meta> fmt::Display for QueryResult<M> {
+impl<M: routecore::record::Meta> fmt::Display for QueryResult<M> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let pfx_str = match self.prefix {
             Some(pfx) => format!("{}", pfx),
