@@ -464,26 +464,28 @@ impl<Store: StorageBackend> std::fmt::Display for TreeBitMap<Store> {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let total_nodes = self.store.get_nodes_len();
 
-        write!(_f, "prefix vec size {}", self.store.get_prefixes_len())?;
-        write!(_f, "finished building tree...")?;
-        write!(_f, "{:?} nodes created", total_nodes)?;
-        write!(_f, 
+        writeln!(_f, "prefix vec size {}", self.store.get_prefixes_len())?;
+        writeln!(_f, "finished building tree...")?;
+        writeln!(_f, "{:?} nodes created", total_nodes)?;
+        writeln!(_f,
             "size of node: {} bytes",
             std::mem::size_of::<SizedStrideNode<u32, InMemNodeId>>()
         )?;
-        write!(_f, 
+        writeln!(
+            _f,
             "memory used by nodes: {}kb",
             self.store.get_nodes_len()
                 * std::mem::size_of::<SizedStrideNode<u32, InMemNodeId>>()
                 / 1024
         )?;
 
-        write!(_f, "stride division {:?}", self.strides)?;
+        writeln!(_f, "stride division {:?}", self.strides)?;
         for s in &self.stats {
-            write!(_f, "{:?}", s)?;
+            writeln!(_f, "{:?}", s)?;
         }
 
-        write!(_f, 
+        writeln!(
+            _f,
             "level\t[{}|{}] nodes occupied/max nodes percentage_max_nodes_occupied prefixes",
             Colour::Blue.paint("nodes"),
             Colour::Green.paint("prefixes")
@@ -519,14 +521,16 @@ impl<Store: StorageBackend> std::fmt::Display for TreeBitMap<Store> {
                 write!(_f, "{}", Colour::Blue.paint("█"))?;
             }
 
-            write!(_f, 
+            writeln!(
+                _f,
                 "{}",
                 Colour::Blue.paint(
                     bars[((nodes_num % SCALE) / (SCALE / 7)) as usize]
                 ) //  = scale / 7
             )?;
 
-            write!(_f, 
+            writeln!(
+                _f,
                 " {}/{} {:.2}%",
                 nodes_num,
                 max_pfx.0,
@@ -539,14 +543,15 @@ impl<Store: StorageBackend> std::fmt::Display for TreeBitMap<Store> {
                 write!(_f, "{}", Colour::Green.paint("█"))?;
             }
 
-            write!(_f, 
+            write!(
+                _f,
                 "{}",
                 Colour::Green.paint(
                     bars[((nodes_num % SCALE) / (SCALE / 7)) as usize]
                 ) //  = scale / 7
             )?;
 
-            write!(_f, " {}", prefixes_num)?;
+            writeln!(_f," {}", prefixes_num)?;
         }
         Ok(())
     }
