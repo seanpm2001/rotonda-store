@@ -5,7 +5,6 @@ use epoch::Guard;
 
 use crate::af::AddressFamily;
 use crate::local_array::store::atomic_types::{NodeBuckets, PrefixBuckets};
-use crate::prefix_record::RecordSet;
 use routecore::addr::Prefix;
 use routecore::record::{MergeUpdate, Meta};
 
