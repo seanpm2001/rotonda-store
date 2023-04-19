@@ -2,7 +2,7 @@ pub use crossbeam_epoch::{self as epoch, Guard};
 
 pub use routecore::addr::Prefix;
 pub use routecore::record::Meta;
-
+pub use routecore::record::MergeUpdate;
 pub use crate::local_array::store::errors::PrefixStoreError;
 pub use crate::{AddressFamily, IPv4, IPv6, PrefixRecordMap};
 
