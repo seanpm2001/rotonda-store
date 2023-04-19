@@ -486,10 +486,10 @@ impl<
                 PrefixId::new(prefix.get_net(), prefix.get_len()),
                 guard,
             )?;
-        let inner_stored_prefix =
-            atomic_stored_prefix.0.load(Ordering::SeqCst, guard);
-
+            
         loop {
+            let inner_stored_prefix =
+                atomic_stored_prefix.0.load(Ordering::SeqCst, guard);
             match inner_stored_prefix.is_null() {
                 // There's no StoredPrefix at this location. Create a new
                 // PrefixRecord and store it in the empty slot.
