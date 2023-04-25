@@ -448,9 +448,10 @@ impl<
         pfx: PrefixId<AF>,
         record: M,
     ) -> Result<(Upsert, u32), PrefixStoreError> {
-        let guard = &epoch::pin();
+        
 
         if pfx.get_len() == 0 {
+            let guard = &epoch::pin();
             let res = self.update_default_route_prefix_meta(record, guard)?;
             return Ok(res);
         }
@@ -480,6 +481,7 @@ impl<
 
             // insert_match! returns the node_id of the next node to be
             // traversed. It was created if it did not exist.
+            let guard = &epoch::pin();
             let node_result = insert_match![
                 // applicable to the whole outer match in the macro
                 self;

@@ -475,8 +475,11 @@ impl<
         &self,
         prefix: PrefixId<AF>,
         record: M,
-        guard: &Guard,
+        _guard: &Guard,
     ) -> Result<(Upsert, u32), PrefixStoreError> {
+        let guard = &epoch::pin();
+        // let back_off = Backoff::new();
+
         let mut retry_count = 0;
         let mut new_record = Arc::new(record);
 
@@ -537,7 +540,7 @@ impl<
 
                             self.counters
                                 .inc_prefixes_count(prefix.get_len());
-
+                            
                             return Ok((Upsert::Insert, retry_count));
                         }
                         // ...somebody beat us to it, the slot's not empty
@@ -550,6 +553,8 @@ impl<
                                     current
                                 );
                             }
+                            // back_off.spin();
+
                             retry_count += 1;
 
                             new_record =
@@ -580,13 +585,14 @@ impl<
                     // location: Once it is created the prefix-record itself
                     // will not be changed anymore, only its record can be
                     // RCU'd.
-                    unsafe { inner_stored_prefix.deref() }
+                    unsafe { inner_stored_prefix.deref_mut() }
                         .record
                         .as_arc_swap()
                         .rcu(|meta| {
                             meta.clone_merge_update(&new_record).unwrap()
                         });
 
+                    // guard.flush();
                     return Ok((Upsert::Update, retry_count));
                 }
             }
@@ -636,7 +642,7 @@ impl<
                     .ok_or(PrefixStoreError::StoreNotReadyError);
             };
 
-            stored_prefix = Some(unsafe { prefix_probe.assume_init_ref() });
+            stored_prefix = Some(prefix_probe);
 
             if let Some(StoredPrefix {
                 prefix,
@@ -678,8 +684,8 @@ impl<
         Option<(
             PrefixId<AF>,
             u8,
-            &'a PrefixSet<AF, M>,
-            [Option<(&'a PrefixSet<AF, M>, usize)>; 26],
+            &'a BetterPrefixSet<AF, M>,
+            [Option<(&'a BetterPrefixSet<AF, M>, usize)>; 26],
             usize,
         )>,
     ) {
@@ -701,7 +707,7 @@ impl<
             if !prefixes.is_null() {
                 let prefix_ref = unsafe { &mut prefixes.deref_mut()[index] };
                 if let Some(stored_prefix) =
-                    unsafe { prefix_ref.assume_init_ref() }
+                    prefix_ref
                         .get_stored_prefix(guard)
                 {
                     if id == stored_prefix.get_prefix_id() {
@@ -735,7 +741,7 @@ impl<
         struct SearchLevel<'s, AF: AddressFamily, M: crate::prefix_record::Meta> {
             f: &'s dyn for<'a> Fn(
                 &SearchLevel<AF, M>,
-                &PrefixSet<AF, M>,
+                &BetterPrefixSet<AF, M>,
                 u8,
                 &'a Guard,
             ) -> Option<(
@@ -746,7 +752,7 @@ impl<
 
         let search_level = SearchLevel {
             f: &|search_level: &SearchLevel<AF, M>,
-                 prefix_set: &PrefixSet<AF, M>,
+                 prefix_set: &BetterPrefixSet<AF, M>,
                  mut level: u8,
                  guard: &Guard| {
                 // HASHING FUNCTION
@@ -756,7 +762,7 @@ impl<
                 let prefix_ref = unsafe { &prefixes.deref()[index] };
 
                 if let Some(stored_prefix) =
-                    unsafe { prefix_ref.assume_init_ref() }
+                    prefix_ref
                         .get_stored_prefix(guard)
                 {
                     if prefix_id == stored_prefix.prefix {

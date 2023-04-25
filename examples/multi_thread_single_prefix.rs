@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         32,
     );
 
-    let threads = (0..16).enumerate().map(|(i, _)| {
+    let threads = (0..100).enumerate().map(|(i, _)| {
         let tree_bitmap = tree_bitmap.clone();
 
         std::thread::Builder::new()

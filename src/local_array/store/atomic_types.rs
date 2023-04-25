@@ -70,7 +70,7 @@ pub struct StoredPrefix<AF: AddressFamily, M: crate::prefix_record::Meta> {
     // the next aggregated record for this prefix and hash_id
     // pub(crate) next_agg_record: Atomic<StoredAggRecord<AF, M>>,
     // the reference to the next set of records for this prefix, if any.
-    pub next_bucket: PrefixSet<AF, M>,
+    pub next_bucket: BetterPrefixSet<AF, M>,
 }
 
 impl<AF: AddressFamily, M: crate::prefix_record::Meta> StoredPrefix<AF, M> {
@@ -86,21 +86,21 @@ impl<AF: AddressFamily, M: crate::prefix_record::Meta> StoredPrefix<AF, M> {
         let next_level = PB::get_bits_for_len(pfx_id.get_len(), level + 1);
 
         trace!("this level {} next level {}", this_level, next_level);
-        let next_bucket: PrefixSet<AF, M> = if next_level > 0 {
+        let next_bucket: BetterPrefixSet<AF, M> = if next_level > 0 {
             debug!(
                 "{} store: INSERT with new bucket of size {} at prefix len {}",
                 std::thread::current().name().unwrap(),
                 1 << (next_level - this_level),
                 pfx_id.get_len()
             );
-            PrefixSet::init((1 << (next_level - this_level)) as usize)
+            BetterPrefixSet::init((1 << (next_level - this_level)) as usize)
         } else {
             debug!(
                 "{} store: INSERT at LAST LEVEL with empty bucket at prefix len {}",
                 std::thread::current().name().unwrap(),
                 pfx_id.get_len()
             );
-            PrefixSet::empty()
+            BetterPrefixSet::empty()
         };
         // End of calculation
 
@@ -164,7 +164,7 @@ impl<M: crate::prefix_record::Meta> AtomicRecord<M> {
 // serial == 0 as the empty value. We're not using an Option here, to
 // avoid going outside our atomic procedure.
 #[allow(clippy::type_complexity)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AtomicStoredPrefix<AF: AddressFamily, M: crate::prefix_record::Meta>(
     pub Atomic<StoredPrefix<AF, M>>,
 );
@@ -227,7 +227,7 @@ impl<AF: AddressFamily, Meta: crate::prefix_record::Meta>
     pub(crate) fn get_next_bucket<'a>(
         &'a self,
         guard: &'a Guard,
-    ) -> Option<&PrefixSet<AF, Meta>> {
+    ) -> Option<&BetterPrefixSet<AF, Meta>> {
         // let guard = &epoch::pin();
         if let Some(stored_prefix) = self.get_stored_prefix(guard) {
             // if stored_prefix.super_agg_record.is_some() {
@@ -271,7 +271,7 @@ where
 {
     fn init() -> Self;
     fn remove(&mut self, id: PrefixId<AF>) -> Option<M>;
-    fn get_root_prefix_set(&self, len: u8) -> &'_ PrefixSet<AF, M>;
+    fn get_root_prefix_set(&self, len: u8) -> &'_ BetterPrefixSet<AF, M>;
     fn get_bits_for_len(len: u8, level: u8) -> u8;
 }
 
@@ -284,6 +284,34 @@ where
 // implied in the position in the array a serial numher has. A PrefixSet
 // doesn't know anything about the node it is contained in, so it needs a
 // base address to be able to calculate the complete prefix of a child prefix.
+
+#[derive(Debug)]
+pub struct BetterPrefixSet<AF: AddressFamily, M: Meta>(
+    pub Atomic<Vec<AtomicStoredPrefix<AF, M>>>
+);
+
+impl<AF: AddressFamily, M: Meta> BetterPrefixSet<AF, M> {
+    pub fn init(size: usize) -> Self {
+        let v = Vec::from_iter(std::iter::repeat(AtomicStoredPrefix::<AF, M>::empty()).take(size));
+        BetterPrefixSet(v.into())
+    }
+
+    pub(crate) fn get_by_index<'a>(
+        &'a self,
+        index: usize,
+        guard: &'a Guard,
+    ) -> &'a AtomicStoredPrefix<AF, M> {
+        assert!(!self.0.load(Ordering::SeqCst, guard).is_null());
+        unsafe {
+            &self.0.load(Ordering::SeqCst, guard).deref()[index]
+        }
+    }
+
+    pub(crate) fn empty() -> Self {
+        BetterPrefixSet(Atomic::null())
+    }
+}
+
 
 #[derive(Debug)]
 #[repr(align(8))]

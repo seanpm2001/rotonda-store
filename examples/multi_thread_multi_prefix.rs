@@ -43,8 +43,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut x = 0;
                     loop {
                         let pfx = Prefix::new_relaxed(pfx_int.clone().load(std::sync::atomic::Ordering::Relaxed).into_ipaddr(), 32).unwrap();
-                        let guard = &crossbeam_epoch::pin();
-                        while x < 100 {
+                        // let guard = &crossbeam_epoch::pin();
+                        while x < 10_000 {
                             let asn = PrefixAs(rng.gen());
                             match tree_bitmap.insert(&pfx, asn) {
                                 Ok(metrics) => {
@@ -59,28 +59,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     println!("{}", e);
                                 }
                             };
-                            let _s_spfx = tree_bitmap.match_prefix(
-                                &pfx,
-                                &MatchOptions {
-                                    match_type: rotonda_store::MatchType::ExactMatch,
-                                    include_all_records: true,
-                                    include_less_specifics: true,
-                                    include_more_specifics: true,
-                                },
-                                guard,
-                            ).prefix_meta;
+                            // let _s_spfx = tree_bitmap.match_prefix(
+                            //     &pfx,
+                            //     &MatchOptions {
+                            //         match_type: rotonda_store::MatchType::ExactMatch,
+                            //         include_all_records: true,
+                            //         include_less_specifics: true,
+                            //         include_more_specifics: true,
+                            //     },
+                            //     guard,
+                            // ).prefix_meta;
                             x += 1;
                         }
 
-                        println!("thread {} will park itself", i);
+                        // println!("thread {} will park itself", i);
 
-                        guard.flush();
-                        thread::park();
+                        // guard.flush();
+                        // thread::park();
                         // thread::sleep(Duration::from_secs(3));
-                        println!("wake thread {}", i);
-                        println!("prefix count {:?}", tree_bitmap.prefixes_count());
+                        // println!("wake thread {}", i);
+                        // println!("prefix count {:?}", tree_bitmap.prefixes_count());
                         x = 0;
 
+                        thread::park();
                     }
                 },
             )
