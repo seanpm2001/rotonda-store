@@ -288,8 +288,7 @@ pub struct PrefixSet<AF: AddressFamily, M: Meta>(
 
 impl<AF: AddressFamily, M: Meta> PrefixSet<AF, M> {
     pub fn init(size: usize) -> Self {
-        let v = Vec::from_iter(std::iter::repeat(AtomicStoredPrefix::<AF, M>::empty()).take(size));
-        PrefixSet(v.into())
+        PrefixSet(Atomic::from(Vec::from_iter(std::iter::repeat(AtomicStoredPrefix::<AF, M>::empty()).take(size))))
     }
 
     pub(crate) fn get_by_index<'a>(

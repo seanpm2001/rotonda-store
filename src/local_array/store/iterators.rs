@@ -310,7 +310,7 @@ pub(crate) struct MoreSpecificPrefixIter<
 
 impl<
         'a,
-        AF: AddressFamily + 'a,
+        AF: AddressFamily,
         M: Meta,
         NB: NodeBuckets<AF>,
         PB: PrefixBuckets<AF, M>,

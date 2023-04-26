@@ -197,7 +197,7 @@ pub struct StoreStats {
 #[derive(Debug)]
 pub struct CustomAllocStorage<
     AF: AddressFamily,
-    M: crate::prefix_record::Meta + crate::prefix_record::MergeUpdate,
+    M: crate::prefix_record::Meta,
     NB: NodeBuckets<AF>,
     PB: PrefixBuckets<AF, M>,
 > {
@@ -528,6 +528,10 @@ impl<
                                     record: stored_record,
                                     ..
                                 } = unsafe { spfx.deref() };
+
+                                let a = unsafe { spfx.into_owned() };
+
+                                guard.defer(move || { drop(a); });
                                 if log_enabled!(log::Level::Info) {
                                     info!(
                                         "{} store: Inserted new prefix record {}/{} with {:?}",

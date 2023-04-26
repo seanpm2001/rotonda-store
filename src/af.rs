@@ -22,6 +22,9 @@ pub trait AddressFamily:
     + Zero
     + Copy
     + Ord
+    + Send
+    + Sync
+    + 'static
 {
     /// The byte representation of the family filled with 1s.
     const BITMASK: Self;
