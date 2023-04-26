@@ -14,36 +14,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     trace!("Starting multi-threaded yolo testing....");
-    let tree_bitmap = MultiThreadedStore::<PrefixAs>::new()?;
-    // let f = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tree_bitmap = MultiThreadedStore::<PrefixAs>::new().unwrap();
 
     let mut pfx_int = 0_u32;
-
-    // let threads =
-    // (0..16).enumerate().map(|(i, _)| {
-    // let tree_bitmap = tree_bitmap.clone();
-    // let start_flag = Arc::clone(&f);
 
     let thread = std::thread::Builder::new()
         .name(1_u8.to_string())
         .spawn(move || -> Result<(), Box<dyn std::error::Error + Send>> {
-            // while !start_flag.load(std::sync::atomic::Ordering::Acquire) {
             let mut rng= rand::thread_rng();
 
             println!("park thread {}", 1);
-            thread::park();
-            // }
+            // thread::park();
 
             print!("\nstart {} ---", 1);
-            // let mut x = 0;
+
             while pfx_int <= 24 {
                 pfx_int += 1;
                 let pfx = Prefix::new_relaxed(
                     pfx_int.into_ipaddr(),
                     32,
                 );
-                // x += 1;
-                // print!("{}-", i);
+                
                 let asn: u32 = rng.gen();
                 match tree_bitmap.insert(&pfx.unwrap(), PrefixAs(asn)) {
                     Ok(_) => {}
@@ -53,21 +44,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
 
+            drop(tree_bitmap);
             Ok(())
 
-            // println!("--thread {} done.", 1);
         })
         .unwrap();
-    // });
+    
+    // thread.thread().unpark();
 
-    // thread::sleep(Duration::from_secs(60));
+    // thread::sleep(Duration::from_secs(10));
 
-    // f.store(true, std::sync::atomic::Ordering::Release);
-    // thread.for_each(|t| {
-    thread.thread().unpark();
-    // });
-
-    thread::sleep(Duration::from_secs(10));
+    thread.join().unwrap().unwrap();
 
     println!("------ end of inserts\n");
 
@@ -86,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // println!("query result");
     // println!("{}", s_spfx);
     // println!("{}", s_spfx.more_specifics.unwrap());
-
+    
     println!("-----------");
 
     Ok(())
