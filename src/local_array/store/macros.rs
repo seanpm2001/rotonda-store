@@ -186,7 +186,7 @@ macro_rules! store_node_closure {
                                             retry_count +=1 ;
 
                                             if log_enabled!(log::Level::Trace) {
-                                                info!("Failed to create node {}. Someone is busy creating it",$id);
+                                                trace!("Failed to create node {}. Someone is busy creating it",$id);
                                             }
 
                                             let StoredNode { node: cur_node,.. } = *new.into_box();

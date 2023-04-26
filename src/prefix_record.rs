@@ -427,14 +427,14 @@ pub trait MergeUpdate {
 /// Trait for types that can be used as metadata of a record
 pub trait Meta
 where
-    Self: fmt::Debug + Sized + fmt::Display + Clone + MergeUpdate + std::marker::Send + Sync + 'static,
+    Self: fmt::Debug + Sized + fmt::Display + Clone + MergeUpdate,
 {
     fn summary(&self) -> String;
 }
 
 impl<T> Meta for T
 where
-    T: fmt::Debug + fmt::Display + Clone + MergeUpdate + std::marker::Send + Sync + 'static,
+    T: fmt::Debug + fmt::Display + Clone + MergeUpdate,
 {
     fn summary(&self) -> String {
         format!("{}", self)

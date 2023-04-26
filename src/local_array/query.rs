@@ -22,7 +22,7 @@ use super::store::atomic_types::StoredPrefix;
 impl<'a, AF, M, NB, PB> TreeBitMap<AF, M, NB, PB>
 where
     AF: AddressFamily,
-    M: Meta,
+    M: Meta + MergeUpdate,
     NB: NodeBuckets<AF>,
     PB: PrefixBuckets<AF, M>,
 {
