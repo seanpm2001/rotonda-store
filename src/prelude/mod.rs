@@ -20,7 +20,7 @@ pub mod multi {
     pub use crossbeam_epoch::{self as epoch, Guard};
 
     pub use crate::local_array::store::atomic_types::{
-        NodeBuckets, NodeSet, PrefixBuckets, BetterPrefixSet,
+        NodeBuckets, NodeSet, PrefixBuckets, PrefixSet,
     };
     pub use crate::local_array::tree::{PrefixId, StrideNodeId, TreeBitMap};
     pub use crate::local_array::store::errors::PrefixStoreError;

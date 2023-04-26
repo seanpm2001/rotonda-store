@@ -19,7 +19,7 @@ macro_rules! impl_search_level {
                         // Read the node from the block pointed to by the
                         // Atomic pointer.
                         let stored_node = unsafe {
-                            &mut nodes.0.load(Ordering::SeqCst, guard).deref()[index].assume_init_ref()
+                            &mut nodes.0.load(Ordering::SeqCst, guard).deref_mut()[index]
                         };
                         let this_node = stored_node.load(Ordering::Acquire, guard);
 
@@ -77,7 +77,7 @@ macro_rules! retrieve_node_mut_with_guard_closure {
                          // Read the node from the block pointed to by the
                          // Atomic pointer.
                          let stored_node = unsafe {
-                             &mut nodes.0.load(Ordering::SeqCst, guard).deref_mut()[index].assume_init_ref()
+                             &mut nodes.0.load(Ordering::SeqCst, guard).deref_mut()[index]
                          };
                          let mut this_node = stored_node.load(Ordering::Acquire, guard);
 
@@ -143,8 +143,7 @@ macro_rules! store_node_closure {
 
                     match stored_nodes.is_null() {
                         false => {
-                            let node_ref =
-                                unsafe { stored_nodes.deref()[index].assume_init_ref() };
+                            let node_ref = &unsafe { stored_nodes.deref() }[index];
                             let stored_node = node_ref.load(Ordering::Acquire, $guard);
 
                             match stored_node.is_null() {
@@ -205,7 +204,6 @@ macro_rules! store_node_closure {
                                 false => {
                                     // A node exists, might be ours, might be another one
                                     let StoredNode { node_id, node_set, .. } = unsafe { stored_node.deref() };
-
                                     if log_enabled!(log::Level::Trace) {
                                         trace!("
                                             {} store: Node here exists {:?}",
@@ -242,7 +240,7 @@ macro_rules! store_node_closure {
                                             next_bit_shift if next_bit_shift > 0 => {
                                                 (search_level.f)(
                                                     search_level,
-                                                    node_set,
+                                                    &node_set,
                                                     new_node,
                                                     level,
                                                     retry_count

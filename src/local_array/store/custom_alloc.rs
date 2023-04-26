@@ -684,8 +684,8 @@ impl<
         Option<(
             PrefixId<AF>,
             u8,
-            &'a BetterPrefixSet<AF, M>,
-            [Option<(&'a BetterPrefixSet<AF, M>, usize)>; 26],
+            &'a PrefixSet<AF, M>,
+            [Option<(&'a PrefixSet<AF, M>, usize)>; 26],
             usize,
         )>,
     ) {
@@ -741,7 +741,7 @@ impl<
         struct SearchLevel<'s, AF: AddressFamily, M: crate::prefix_record::Meta> {
             f: &'s dyn for<'a> Fn(
                 &SearchLevel<AF, M>,
-                &BetterPrefixSet<AF, M>,
+                &PrefixSet<AF, M>,
                 u8,
                 &'a Guard,
             ) -> Option<(
@@ -752,7 +752,7 @@ impl<
 
         let search_level = SearchLevel {
             f: &|search_level: &SearchLevel<AF, M>,
-                 prefix_set: &BetterPrefixSet<AF, M>,
+                 prefix_set: &PrefixSet<AF, M>,
                  mut level: u8,
                  guard: &Guard| {
                 // HASHING FUNCTION

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::{fmt::Debug, mem::MaybeUninit, sync::atomic::Ordering};
+use std::{fmt::Debug, sync::atomic::Ordering};
 
 use arc_swap::access::Access;
 use arc_swap::ArcSwap;
@@ -7,7 +7,7 @@ use crossbeam_epoch::{self as epoch, Atomic};
 
 use log::{debug, log_enabled, trace};
 
-use epoch::{Guard, Owned};
+use epoch::Guard;
 
 use crate::local_array::tree::*;
 use crate::AddressFamily;
@@ -18,7 +18,7 @@ use crate::prelude::Meta;
 #[allow(clippy::type_complexity)]
 #[derive(Debug)]
 pub struct NodeSet<AF: AddressFamily, S: Stride>(
-    pub Atomic<[MaybeUninit<Atomic<StoredNode<AF, S>>>]>,
+    pub Atomic<Vec<Atomic<StoredNode<AF, S>>>>,
 );
 
 #[derive(Debug)]
@@ -43,12 +43,8 @@ impl<AF: AddressFamily, S: Stride> NodeSet<AF, S> {
             );
         }
 
-        let mut l =
-            Owned::<[MaybeUninit<Atomic<StoredNode<AF, S>>>]>::init(size);
-        for i in 0..size {
-            l[i] = MaybeUninit::new(Atomic::null());
-        }
-        NodeSet(l.into())
+        let v = Vec::from_iter(std::iter::repeat(Atomic::null()).take(size));
+        NodeSet(v.into())
     }
 }
 
@@ -70,7 +66,7 @@ pub struct StoredPrefix<AF: AddressFamily, M: crate::prefix_record::Meta> {
     // the next aggregated record for this prefix and hash_id
     // pub(crate) next_agg_record: Atomic<StoredAggRecord<AF, M>>,
     // the reference to the next set of records for this prefix, if any.
-    pub next_bucket: BetterPrefixSet<AF, M>,
+    pub next_bucket: PrefixSet<AF, M>,
 }
 
 impl<AF: AddressFamily, M: crate::prefix_record::Meta> StoredPrefix<AF, M> {
@@ -86,21 +82,21 @@ impl<AF: AddressFamily, M: crate::prefix_record::Meta> StoredPrefix<AF, M> {
         let next_level = PB::get_bits_for_len(pfx_id.get_len(), level + 1);
 
         trace!("this level {} next level {}", this_level, next_level);
-        let next_bucket: BetterPrefixSet<AF, M> = if next_level > 0 {
+        let next_bucket: PrefixSet<AF, M> = if next_level > 0 {
             debug!(
                 "{} store: INSERT with new bucket of size {} at prefix len {}",
                 std::thread::current().name().unwrap(),
                 1 << (next_level - this_level),
                 pfx_id.get_len()
             );
-            BetterPrefixSet::init((1 << (next_level - this_level)) as usize)
+            PrefixSet::init((1 << (next_level - this_level)) as usize)
         } else {
             debug!(
                 "{} store: INSERT at LAST LEVEL with empty bucket at prefix len {}",
                 std::thread::current().name().unwrap(),
                 pfx_id.get_len()
             );
-            BetterPrefixSet::empty()
+            PrefixSet::empty()
         };
         // End of calculation
 
@@ -227,7 +223,7 @@ impl<AF: AddressFamily, Meta: crate::prefix_record::Meta>
     pub(crate) fn get_next_bucket<'a>(
         &'a self,
         guard: &'a Guard,
-    ) -> Option<&BetterPrefixSet<AF, Meta>> {
+    ) -> Option<&PrefixSet<AF, Meta>> {
         // let guard = &epoch::pin();
         if let Some(stored_prefix) = self.get_stored_prefix(guard) {
             // if stored_prefix.super_agg_record.is_some() {
@@ -271,7 +267,7 @@ where
 {
     fn init() -> Self;
     fn remove(&mut self, id: PrefixId<AF>) -> Option<M>;
-    fn get_root_prefix_set(&self, len: u8) -> &'_ BetterPrefixSet<AF, M>;
+    fn get_root_prefix_set(&self, len: u8) -> &'_ PrefixSet<AF, M>;
     fn get_bits_for_len(len: u8, level: u8) -> u8;
 }
 
@@ -286,14 +282,14 @@ where
 // base address to be able to calculate the complete prefix of a child prefix.
 
 #[derive(Debug)]
-pub struct BetterPrefixSet<AF: AddressFamily, M: Meta>(
+pub struct PrefixSet<AF: AddressFamily, M: Meta>(
     pub Atomic<Vec<AtomicStoredPrefix<AF, M>>>
 );
 
-impl<AF: AddressFamily, M: Meta> BetterPrefixSet<AF, M> {
+impl<AF: AddressFamily, M: Meta> PrefixSet<AF, M> {
     pub fn init(size: usize) -> Self {
         let v = Vec::from_iter(std::iter::repeat(AtomicStoredPrefix::<AF, M>::empty()).take(size));
-        BetterPrefixSet(v.into())
+        PrefixSet(v.into())
     }
 
     pub(crate) fn get_by_index<'a>(
@@ -308,70 +304,70 @@ impl<AF: AddressFamily, M: Meta> BetterPrefixSet<AF, M> {
     }
 
     pub(crate) fn empty() -> Self {
-        BetterPrefixSet(Atomic::null())
-    }
-}
-
-
-#[derive(Debug)]
-#[repr(align(8))]
-pub struct PrefixSet<AF: AddressFamily, M: Meta>(
-    pub Atomic<[MaybeUninit<AtomicStoredPrefix<AF, M>>]>,
-);
-
-impl<AF: AddressFamily, M: Meta> PrefixSet<AF, M> {
-    pub fn init(size: usize) -> Self {
-        let mut l =
-            Owned::<[MaybeUninit<AtomicStoredPrefix<AF, M>>]>::init(size);
-        trace!("creating space for {} prefixes in prefix_set", &size);
-        for i in 0..size {
-            l[i] = MaybeUninit::new(AtomicStoredPrefix::empty());
-        }
-        PrefixSet(l.into())
-    }
-
-    // pub fn get_len_recursive(&self) -> usize {
-    //     fn recurse_len<AF: AddressFamily, M: crate::prefix_record::Meta>(
-    //         start_set: &PrefixSet<AF, M>,
-    //     ) -> usize {
-    //         let mut size: usize = 0;
-    //         let guard = &epoch::pin();
-    //         let start_set = start_set.0.load(Ordering::SeqCst, guard);
-    //         for p in unsafe { start_set.deref() } {
-    //             let pfx = unsafe { p.assume_init_ref() };
-    //             if !pfx.is_empty(guard) {
-    //                 size += 1;
-    //                 trace!(
-    //                     "recurse found pfx {:?} cur size {}",
-    //                     pfx.get_prefix_id(),
-    //                     size
-    //                 );
-    //                 if let Some(next_bucket) = pfx.get_next_bucket(guard) {
-    //                     trace!("found next bucket");
-    //                     size += recurse_len(next_bucket);
-    //                 }
-    //             }
-    //         }
-
-    //         size
-    //     }
-
-    //     recurse_len(self)
-    // }
-
-    pub(crate) fn get_by_index<'a>(
-        &'a self,
-        index: usize,
-        guard: &'a Guard,
-    ) -> &'a AtomicStoredPrefix<AF, M> {
-        assert!(!self.0.load(Ordering::SeqCst, guard).is_null());
-        unsafe {
-            self.0.load(Ordering::SeqCst, guard).deref()[index]
-                .assume_init_ref()
-        }
-    }
-
-    pub(crate) fn empty() -> Self {
         PrefixSet(Atomic::null())
     }
 }
+
+
+// #[derive(Debug)]
+// #[repr(align(8))]
+// pub struct PrefixSet<AF: AddressFamily, M: Meta>(
+//     pub Atomic<[MaybeUninit<AtomicStoredPrefix<AF, M>>]>,
+// );
+
+// impl<AF: AddressFamily, M: Meta> PrefixSet<AF, M> {
+//     pub fn init(size: usize) -> Self {
+//         let mut l =
+//             Owned::<[MaybeUninit<AtomicStoredPrefix<AF, M>>]>::init(size);
+//         trace!("creating space for {} prefixes in prefix_set", &size);
+//         for i in 0..size {
+//             l[i] = MaybeUninit::new(AtomicStoredPrefix::empty());
+//         }
+//         PrefixSet(l.into())
+//     }
+
+//     // pub fn get_len_recursive(&self) -> usize {
+//     //     fn recurse_len<AF: AddressFamily, M: crate::prefix_record::Meta>(
+//     //         start_set: &PrefixSet<AF, M>,
+//     //     ) -> usize {
+//     //         let mut size: usize = 0;
+//     //         let guard = &epoch::pin();
+//     //         let start_set = start_set.0.load(Ordering::SeqCst, guard);
+//     //         for p in unsafe { start_set.deref() } {
+//     //             let pfx = unsafe { p.assume_init_ref() };
+//     //             if !pfx.is_empty(guard) {
+//     //                 size += 1;
+//     //                 trace!(
+//     //                     "recurse found pfx {:?} cur size {}",
+//     //                     pfx.get_prefix_id(),
+//     //                     size
+//     //                 );
+//     //                 if let Some(next_bucket) = pfx.get_next_bucket(guard) {
+//     //                     trace!("found next bucket");
+//     //                     size += recurse_len(next_bucket);
+//     //                 }
+//     //             }
+//     //         }
+
+//     //         size
+//     //     }
+
+//     //     recurse_len(self)
+//     // }
+
+//     pub(crate) fn get_by_index<'a>(
+//         &'a self,
+//         index: usize,
+//         guard: &'a Guard,
+//     ) -> &'a AtomicStoredPrefix<AF, M> {
+//         assert!(!self.0.load(Ordering::SeqCst, guard).is_null());
+//         unsafe {
+//             self.0.load(Ordering::SeqCst, guard).deref()[index]
+//                 .assume_init_ref()
+//         }
+//     }
+
+//     pub(crate) fn empty() -> Self {
+//         PrefixSet(Atomic::null())
+//     }
+// }

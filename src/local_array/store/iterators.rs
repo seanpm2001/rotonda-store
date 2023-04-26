@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::{marker::PhantomData, sync::atomic::Ordering};
 
-use super::atomic_types::{NodeBuckets, PrefixBuckets, BetterPrefixSet};
+use super::atomic_types::{NodeBuckets, PrefixBuckets, PrefixSet};
 use super::custom_alloc::CustomAllocStorage;
 use crate::{
     af::AddressFamily,
@@ -44,13 +44,13 @@ pub(crate) struct PrefixIter<
 > {
     prefixes: &'a PB,
     cur_len: u8,
-    cur_bucket: &'a BetterPrefixSet<AF, M>,
+    cur_bucket: &'a PrefixSet<AF, M>,
     cur_level: u8,
     // level depth of IPv4 as defined in rotonda-macros/maps.rs
     // Option(parent, cursor position at the parent)
     // 26 is the max number of levels in IPv6, which is the max number of
     // of both IPv4 and IPv6.
-    parents: [Option<(&'a BetterPrefixSet<AF, M>, usize)>; 26],
+    parents: [Option<(&'a PrefixSet<AF, M>, usize)>; 26],
     cursor: usize,
     guard: &'a Guard,
     _af: PhantomData<AF>,
@@ -444,7 +444,7 @@ pub(crate) struct LessSpecificPrefixIter<
 > {
     prefixes: &'a PB,
     cur_len: u8,
-    cur_bucket: &'a BetterPrefixSet<AF, M>,
+    cur_bucket: &'a PrefixSet<AF, M>,
     cur_level: u8,
     cur_prefix_id: PrefixId<AF>,
     guard: &'a Guard,
