@@ -18,7 +18,7 @@ crossbeam-utils = "^0.8"
 log = "^0.4"
 rotonda-macros = "0.2.0-pre.5"
 
-routecore = { version = "0.3.0-dev", features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git", rev = "a1833f3420bed9695a393cdbbb278acd49ad9acb" } # branch = "aspath-with-hops" }
+routecore = { version = "0.3.0-dev", features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git", branch = "rotonda-runtime-testing" }
 ansi_term = "^0.12"
 
 [build-dependencies]
