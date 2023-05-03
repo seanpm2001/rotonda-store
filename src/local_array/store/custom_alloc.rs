@@ -489,16 +489,16 @@ impl<
                 guard,
             )?;
 
-        let mut inner_stored_prefix =
+        let mut inner_stored_prefix = 
             atomic_stored_prefix.0.load(Ordering::SeqCst, guard);
 
         loop {
             
-            match inner_stored_prefix.is_null() {
+            match unsafe { inner_stored_prefix.deref() } {
                 // There's no StoredPrefix at this location yet. Create a new
                 // PrefixRecord with our record and try to store it in the 
                 // empty slot.
-                true => {
+                None => {
                     if log_enabled!(log::Level::Debug) {
                         debug!(
                             "{} store: Create new prefix record",
@@ -513,8 +513,8 @@ impl<
 
                     // We're expecting an empty slot.
                     match atomic_stored_prefix.0.compare_exchange(
-                        Shared::null(),
-                        Owned::new(new_stored_prefix),
+                        inner_stored_prefix,
+                        Owned::new(Some(new_stored_prefix)),
                         Ordering::SeqCst,
                         Ordering::SeqCst,
                         guard,
@@ -523,19 +523,20 @@ impl<
                         // StorePrefix is stored into it.
                         Ok(spfx) => {
                             if log_enabled!(log::Level::Info) {
-                                let StoredPrefix {
+                                if let Some(StoredPrefix {
                                     prefix,
                                     record: stored_record,
                                     ..
-                                } = unsafe { spfx.deref() };
-                                if log_enabled!(log::Level::Info) {
-                                    info!(
-                                        "{} store: Inserted new prefix record {}/{} with {:?}",
-                                        std::thread::current().name().unwrap(),
-                                        prefix.get_net().into_ipaddr(), prefix.get_len(),
-                                        stored_record.get_meta_cloned()
-                                    );
-                                }
+                                }) = unsafe { spfx.deref() } {
+                                    if log_enabled!(log::Level::Info) {
+                                        info!(
+                                            "{} store: Inserted new prefix record {}/{} with {:?}",
+                                            std::thread::current().name().unwrap(),
+                                            prefix.get_net().into_ipaddr(), prefix.get_len(),
+                                            stored_record.get_meta_cloned()
+                                        );
+                                    }
+                                } 
                             }
 
                             self.counters
@@ -558,7 +559,7 @@ impl<
                             retry_count += 1;
 
                             new_record =
-                                new.into_box().get_record_as_arc().clone();
+                                new.into_box().unwrap().get_record_as_arc().clone();
 
                             // reuse the returned existing prefix_record,
                             // for the next iteration.
@@ -571,7 +572,7 @@ impl<
                 // There already is a StoredPrefix with a record at this 
                 // location. Perform a Read-Copy-Update (RCU) on the record
                 // to update its value.
-                false => {
+                Some(inner_stored_prefix) => {
                     if log_enabled!(log::Level::Debug) {
                         debug!(
                             "{} store: Found existing prefix record for {}/{}",
@@ -585,7 +586,7 @@ impl<
                     // location: Once it is created the prefix-record itself
                     // will not be changed anymore, only its record can be
                     // RCU'd.
-                    unsafe { inner_stored_prefix.deref_mut() }
+                    inner_stored_prefix
                         .record
                         .as_arc_swap()
                         .rcu(|meta| {
@@ -619,45 +620,42 @@ impl<
             .prefixes
             .get_root_prefix_set(search_prefix_id.get_len());
         let mut level: u8 = 0;
-        let mut stored_prefix = None;
-
         loop {
             // HASHING FUNCTION
             let index = Self::hash_prefix_id(search_prefix_id, level);
 
-            let prefixes = prefix_set.0.load(Ordering::SeqCst, guard);
-            trace!("prefixes at level {}? {:?}", level, !prefixes.is_null());
+            let prefixes = unsafe { prefix_set.0.load(Ordering::SeqCst, guard).deref() };
+            trace!("prefixes at level {}? {:?}", level, !prefixes.is_empty());
 
             // probe the slot with the index that's the result of the hashing.
-            let prefix_probe = if !prefixes.is_null() {
+            let prefix_probe = if !prefixes.is_empty() {
                 trace!("prefix set found.");
-                unsafe { &prefixes.deref()[index] }
+                &prefixes[index]
             } else {
                 // We're at the end of the chain and haven't found our
                 // search_prefix_id anywhere. Return the end-of-the-chain
                 // StoredPrefix, so the caller can attach a new one.
                 trace!("no prefix set.");
-                return stored_prefix
-                    .map(|sp| (sp, level))
-                    .ok_or(PrefixStoreError::StoreNotReadyError);
+                // return stored_prefix
+                //     .map(|sp| (sp, level))
+                //     .ok_or(PrefixStoreError::StoreNotReadyError);
+               return Err(PrefixStoreError::StoreNotReadyError);
             };
-
-            stored_prefix = Some(prefix_probe);
 
             if let Some(StoredPrefix {
                 prefix,
                 next_bucket,
                 ..
-            }) = stored_prefix.unwrap().get_stored_prefix_mut(guard)
+            }) = prefix_probe.get_stored_prefix_mut(guard)
             {
                 if search_prefix_id == *prefix {
                     // GOTCHA!
                     // Our search-prefix is stored here, so we're returning
                     // it, so its PrefixRecord can be updated by the caller.
                     trace!("found requested prefix {:?}", search_prefix_id);
-                    return stored_prefix
-                        .map(|sp| (sp, level))
-                        .ok_or(PrefixStoreError::StoreNotReadyError);
+                    return Ok((prefix_probe, level));
+                        // .map(|sp| (sp, level))
+                        // .ok_or(PrefixStoreError::StoreNotReadyError);
                 } else {
                     // A Collision. Follow the chain.
                     level += 1;
@@ -668,9 +666,9 @@ impl<
 
             // No record at the deepest level, still we're returning a reference to it,
             // so the caller can insert a new record here.
-            return stored_prefix
-                .map(|sp| (sp, level))
-                .ok_or(PrefixStoreError::StoreNotReadyError);
+            return Ok((prefix_probe, level));
+                // .map(|sp| (sp, level))
+                // .ok_or(PrefixStoreError::StoreNotReadyError);
         }
     }
 
@@ -702,13 +700,11 @@ impl<
             // HASHING FUNCTION
             let index = Self::hash_prefix_id(id, level);
 
-            let mut prefixes = prefix_set.0.load(Ordering::Acquire, guard);
-
-            if !prefixes.is_null() {
-                let prefix_ref = unsafe { &mut prefixes.deref_mut()[index] };
+            let prefixes = 
+                unsafe { prefix_set.0.load(Ordering::Acquire, guard).deref_mut() };
+            if !prefixes.is_empty() {
                 if let Some(stored_prefix) =
-                    prefix_ref
-                        .get_stored_prefix(guard)
+                    prefixes[index].get_stored_prefix(guard)
                 {
                     if id == stored_prefix.get_prefix_id() {
                         trace!("found requested prefix {:?}", id);
@@ -762,8 +758,7 @@ impl<
                 let prefix_ref = unsafe { &prefixes.deref()[index] };
 
                 if let Some(stored_prefix) =
-                    prefix_ref
-                        .get_stored_prefix(guard)
+                    prefix_ref.get_stored_prefix(guard)
                 {
                     if prefix_id == stored_prefix.prefix {
                         trace!("found requested prefix {:?}", prefix_id);

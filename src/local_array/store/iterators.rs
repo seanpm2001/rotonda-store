@@ -192,7 +192,7 @@ impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
                     // If there's a child here there MUST be a prefix here,
                     // as well.
                     if let Some(meta) =
-                        s_pfx.get_stored_prefix(self.guard).map(|p| {
+                        s_pfx.get_stored_prefix(self.guard).as_ref().map(|p| {
                             if log_enabled!(log::Level::Trace) {
                                 // There's a prefix here, that's the next one
                                 trace!("D. found prefix {:?}", p.prefix);
@@ -213,7 +213,7 @@ impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
                     // left, is checking for a prefix at the current
                     // cursor position.
                     if let Some(meta) =
-                        s_pfx.get_stored_prefix(self.guard).map(|p| {
+                        s_pfx.get_stored_prefix(self.guard).as_ref().map(|p| {
                             // There's a prefix here, that's the next one
                             if log_enabled!(log::Level::Debug) {
                                 debug!("E. found prefix {:?}", p.prefix);
@@ -539,11 +539,11 @@ impl<'a, AF: AddressFamily + 'a, M: Meta + 'a, PB: PrefixBuckets<AF, M>>
                     return Some((stored_prefix.prefix, pfx_rec));
                 };
                 // Advance to the next level or the next len.
-                match stored_prefix
+                match unsafe { stored_prefix
                     .next_bucket
                     .0
                     .load(Ordering::SeqCst, self.guard)
-                    .is_null()
+                    .deref().is_empty() }
                 {
                     // No child here, move one length down.
                     true => {

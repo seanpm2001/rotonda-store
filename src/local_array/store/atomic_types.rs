@@ -10,8 +10,8 @@ use log::{debug, log_enabled, trace};
 use epoch::Guard;
 
 use crate::local_array::tree::*;
-use crate::AddressFamily;
 use crate::prelude::Meta;
+use crate::AddressFamily;
 
 // ----------- Node related structs -----------------------------------------
 
@@ -112,9 +112,7 @@ impl<AF: AddressFamily, M: crate::prefix_record::Meta> StoredPrefix<AF, M> {
         self.prefix
     }
 
-    pub(crate) fn get_record_as_arc(
-        &self,
-    ) -> Arc<M> {
+    pub(crate) fn get_record_as_arc(&self) -> Arc<M> {
         self.record.as_arc()
     }
 
@@ -128,18 +126,14 @@ impl<AF: AddressFamily, M: crate::prefix_record::Meta> StoredPrefix<AF, M> {
 // prefix.
 
 #[derive(Debug)]
-pub(crate) struct AtomicRecord<M: crate::prefix_record::Meta>(
-    ArcSwap<M>,
-);
+pub(crate) struct AtomicRecord<M: crate::prefix_record::Meta>(ArcSwap<M>);
 
 impl<M: crate::prefix_record::Meta> AtomicRecord<M> {
     pub fn new(record: Arc<M>) -> Self {
         AtomicRecord(ArcSwap::new(record))
     }
 
-    pub fn as_arc_swap(
-        &self,
-    ) -> &arc_swap::ArcSwapAny<Arc<M>> {
+    pub fn as_arc_swap(&self) -> &arc_swap::ArcSwapAny<Arc<M>> {
         &self.0
     }
 
@@ -148,10 +142,7 @@ impl<M: crate::prefix_record::Meta> AtomicRecord<M> {
     }
 
     pub fn get_meta_cloned(&self) -> M {
-        self.0
-            .map(|r: &M| r)
-            .load()
-            .clone()
+        self.0.map(|r: &M| r).load().clone()
     }
 }
 
@@ -161,50 +152,52 @@ impl<M: crate::prefix_record::Meta> AtomicRecord<M> {
 // avoid going outside our atomic procedure.
 #[allow(clippy::type_complexity)]
 #[derive(Debug, Clone)]
-pub struct AtomicStoredPrefix<AF: AddressFamily, M: crate::prefix_record::Meta>(
-    pub Atomic<StoredPrefix<AF, M>>,
-);
+pub struct AtomicStoredPrefix<
+    AF: AddressFamily,
+    M: crate::prefix_record::Meta,
+>(pub Atomic<Option<StoredPrefix<AF, M>>>);
 
 impl<AF: AddressFamily, Meta: crate::prefix_record::Meta>
     AtomicStoredPrefix<AF, Meta>
 {
     pub(crate) fn empty() -> Self {
-        AtomicStoredPrefix(Atomic::null())
+        AtomicStoredPrefix(Atomic::from(None))
     }
 
-    // pub(crate) fn is_empty(&self, guard: &Guard) -> bool {
-    //     let pfx = self.0.load(Ordering::SeqCst, guard);
-    //     pfx.is_null()
-    // }
+    pub(crate) fn is_empty(&self, guard: &Guard) -> bool {
+        let pfx = unsafe { self.0.load(Ordering::SeqCst, guard).deref() };
+        // pfx.is_null()
+        pfx.is_none()
+    }
 
     pub(crate) fn get_stored_prefix<'a>(
         &'a self,
         guard: &'a Guard,
-    ) -> Option<&'a StoredPrefix<AF, Meta>> {
-        let pfx = self.0.load(Ordering::Acquire, guard);
-        match pfx.is_null() {
-            true => None,
-            false => Some(unsafe { pfx.deref() }),
-        }
+    ) -> &'a Option<StoredPrefix<AF, Meta>> {
+        unsafe { self.0.load(Ordering::Acquire, guard).deref() }
+        // match pfx.is_null() {
+        //     true => None,
+        //     false => Some(unsafe { pfx.deref() }),
+        // }
     }
 
     pub(crate) fn get_stored_prefix_mut<'a>(
         &'a self,
         guard: &'a Guard,
-    ) -> Option<&'a StoredPrefix<AF, Meta>> {
-        let mut pfx = self.0.load(Ordering::SeqCst, guard);
+    ) -> &'a Option<StoredPrefix<AF, Meta>> {
+        unsafe { self.0.load(Ordering::SeqCst, guard).deref_mut() }
 
-        match pfx.is_null() {
-            true => None,
-            false => Some(unsafe { pfx.deref_mut() }),
-        }
+        // match pfx.is_null() {
+        //     true => None,
+        //     false => Some(unsafe { pfx.deref_mut() }),
+        // }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn get_serial(&self) -> usize {
-        let guard = &epoch::pin();
-        unsafe { self.0.load(Ordering::SeqCst, guard).into_owned() }.serial
-    }
+    // #[allow(dead_code)]
+    // pub(crate) fn get_serial(&self) -> usize {
+    //     let guard = &epoch::pin();
+    //     unsafe { self.0.load(Ordering::SeqCst, guard).into_owned() }.serial
+    // }
 
     pub(crate) fn get_prefix_id(&self) -> PrefixId<AF> {
         let guard = &epoch::pin();
@@ -227,22 +220,24 @@ impl<AF: AddressFamily, Meta: crate::prefix_record::Meta>
         // let guard = &epoch::pin();
         if let Some(stored_prefix) = self.get_stored_prefix(guard) {
             // if stored_prefix.super_agg_record.is_some() {
-            if !&stored_prefix
-                .next_bucket
-                .0
-                .load(Ordering::SeqCst, guard)
-                .is_null()
-            {
-                Some(&stored_prefix.next_bucket)
-            } else {
-                None
+            unsafe {
+                if !&stored_prefix
+                    .next_bucket
+                    .0
+                    .load(Ordering::SeqCst, guard)
+                    .deref()
+                    .is_empty()
+                {
+                    Some(&stored_prefix.next_bucket)
+                } else {
+                    None
+                }
             }
         } else {
             None
         }
     }
 }
-
 
 // ----------- FamilyBuckets Trait ------------------------------------------
 //
@@ -283,13 +278,19 @@ where
 
 #[derive(Debug)]
 pub struct PrefixSet<AF: AddressFamily, M: Meta>(
-    pub Atomic<Vec<AtomicStoredPrefix<AF, M>>>
+    pub Atomic<Vec<AtomicStoredPrefix<AF, M>>>,
 );
 
 impl<AF: AddressFamily, M: Meta> PrefixSet<AF, M> {
     pub fn init(size: usize) -> Self {
-        let v = Vec::from_iter(std::iter::repeat(AtomicStoredPrefix::<AF, M>::empty()).take(size));
-        PrefixSet(v.into())
+        let v = Vec::from_iter(
+            std::iter::repeat(AtomicStoredPrefix::<AF, M>::empty()).take(size),
+        );
+        PrefixSet(Atomic::from(v))
+    }
+
+    pub(crate) fn is_empty(&self, guard: &Guard) -> bool {
+        unsafe { self.0.load(Ordering::SeqCst, guard).deref().is_empty() }
     }
 
     pub(crate) fn get_by_index<'a>(
@@ -298,16 +299,32 @@ impl<AF: AddressFamily, M: Meta> PrefixSet<AF, M> {
         guard: &'a Guard,
     ) -> &'a AtomicStoredPrefix<AF, M> {
         assert!(!self.0.load(Ordering::SeqCst, guard).is_null());
-        unsafe {
-            &self.0.load(Ordering::SeqCst, guard).deref()[index]
-        }
+        unsafe { &self.0.load(Ordering::SeqCst, guard).deref()[index] }
+    }
+
+    pub(crate) fn get_stored_prefix_by_index<'a>(
+        &'a self,
+        index: usize,
+        guard: &'a Guard,
+    ) -> &'a Option<StoredPrefix<AF, M>> {
+        assert!(!self.0.load(Ordering::SeqCst, guard).is_null());
+
+        let prefix_set =
+            unsafe { self.0.load(Ordering::SeqCst, guard).deref() };
+
+        // The whole thing is empty, nothing to see here.
+        // if prefix_set.is_empty() { return None; }
+
+        // Either the prefix_set is "uninitialized", i.e. the containing vec
+        // is empty, or it is fully populated, although it might be with only
+        // `None` values.
+        prefix_set[index].get_stored_prefix(guard)
     }
 
     pub(crate) fn empty() -> Self {
-        PrefixSet(Atomic::null())
+        PrefixSet(vec![].into())
     }
 }
-
 
 // #[derive(Debug)]
 // #[repr(align(8))]
