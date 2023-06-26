@@ -436,6 +436,7 @@ pub trait MergeUpdate {
     // copy of the new meta-data. It then returns the result of that merge.
     // The caller should then proceed to insert that as a new entry
     // in the global store.
+    #[must_use]
     fn clone_merge_update(
         &self,
         update_meta: &Self,
