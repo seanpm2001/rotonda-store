@@ -17,7 +17,7 @@ arc-swap        = "^1.6"
 crossbeam-epoch = "^0.9"
 crossbeam-utils = "^0.8"
 log             = "^0.4"
-rotonda-macros  = { version = "^0.3" }
+rotonda-macros  = { version = "=0.3.0" }
 
 routecore   = { version = "0.4.0", features = ["bgp", "bmp", "serde"] }
 ansi_term   = { version = "^0.12", optional = true }
